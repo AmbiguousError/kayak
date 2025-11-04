@@ -182,8 +182,10 @@
             rapids = [];
             
             messageBox.style.display = 'none';
-            if (gameLoopId) cancelAnimationFrame(gameLoopId);
-            gameLoop();
+            if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId);
+                gameLoopId = undefined;
+            }
         }
 
         // --- Procedural Generation ---
@@ -617,6 +619,9 @@
             for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
                 generateRiverSegment(y);
             }
+
+            // Start the game loop now that everything is initialized
+            gameLoop();
         }
 
         // --- Event Listeners ---
