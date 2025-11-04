@@ -604,8 +604,6 @@
                 return;
             }
 
-            console.log(`Starting game with dimensions: ${width}x${height}`);
-
             // Stop any existing loop
             if (gameLoopId) {
                 cancelAnimationFrame(gameLoopId);
@@ -655,9 +653,10 @@
 
         // REMOVED window.onload event
         
-        // Start the game immediately. The startGame function
-        // will now poll for correct dimensions.
-        startGame();
+        // Start the game once the DOM is fully loaded.
+        window.addEventListener('DOMContentLoaded', (event) => {
+            startGame();
+        });
     </script>
 </body>
 </html>
