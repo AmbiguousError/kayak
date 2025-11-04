@@ -207,7 +207,7 @@
             let newLeftX = newCenter - newWidth / 2;
             let newRightX = newCenter + newWidth / 2;
 
-            const segment = { y: y, leftX: newLeftX, rightX: newRightX };
+            const segment = { y: y, leftX: newLeftX, rightX: newRightX, width: newWidth };
             river.unshift(segment);
             lastSegmentY = y;
 
@@ -551,7 +551,7 @@
             for (let i = river.length - 1; i > 0; i--) {
                 const s1 = river[i];
                 const s2 = river[i-1];
-                if (y >= s1.y && y < s2.y) {
+                if (y <= s1.y && y > s2.y) {
                     // Linearly interpolate between the two segments
                     const t = (y - s1.y) / (s2.y - s1.y);
                     const leftX = s1.leftX + (s2.leftX - s1.leftX) * t;
