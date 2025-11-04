@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Kayak Adventure</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background-color: #333;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #3498db;
+        }
+
+        #ui-container {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 10;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+        }
+
+        #score {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        #messageBox {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            font-size: 1.5rem;
+            text-align: center;
+            display: none;
+            border: 2px solid white;
+        }
+
+        #messageBox button {
+            font-size: 1.2rem;
+            padding: 10px 20px;
+            margin-top: 15px;
+            border-radius: 10px;
+            border: none;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        #controls-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 18vh;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            box-sizing: border-box;
+            z-index: 10;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        .control-button {
+            width: 48%;
+            height: 100%;
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            border: 3px solid rgba(255, 255, 255, 0.8);
+            border-radius: 20px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform 0.05s ease, background-color 0.05s ease;
+        }
+
+        .control-button:active {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0.97);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <div id="score">Score: 0</div>
+    </div>
+
+    <div id="messageBox">
+        <div id="messageText">Game Over!</div>
+        <button id="restartButton">Play Again</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="controls-container">
+        <button id="strokeLeft" class="control-button">Left</button>
+        <button id="strokeRight" class="control-button">Right</button>
+    </div>
+
+    <script>
+        // --- Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const restartButton = document.getElementById('restartButton');
+        const leftButton = document.getElementById('strokeLeft');
+        const rightButton = document.getElementById('strokeRight');
+
+        let width, height; // Canvas dimensions
+        let kayak, river, obstacles, gates, rapids;
+        let score, scrollSpeed, baseScrollSpeed, lastSegmentY;
+        let isStrokingLeft = false;
+        let isStrokingRight = false;
+        let isGameOver = false;
+        let gameLoopId;
+        let paddleAnimationLeft = { active: false, progress: 0 };
+        let paddleAnimationRight = { active: false, progress: 0 };
+
+        // --- Game Constants ---
+        const KAYAK_Y_POSITION = 0.5;
+        const KAYAK_BASE_WIDTH = 15;
+        const KAYAK_BASE_HEIGHT = 38;
+        const KAYAK_SCALE = 1.0; // Scale for kayak and paddles
+
+        const RIVER_WIDTH_MIN = 180;
+        const RIVER_WIDTH_MAX = 350;
+        const SEGMENT_LENGTH = 30;
+        const TURN_FACTOR = 0.12;
+        const GATE_WIDTH = 60;
+        const ROCK_SIZE = 12;
+        const RAPID_TURBULENCE = 0.3;
+        const STROKE_POWER = 0.06;
+        const TURN_POWER = 0.15;
+        const FRICTION = 0.98;
+        const BANK_FRICTION = 0.9;
+        const PADDLE_SPEED = 0.08; // Speed of paddle animation (Slowed down)
+
+        // --- Game Initialization ---
+        function init() {
+            isGameOver = false;
+            score = 0;
+            scoreEl.textContent = `Score: 0`;
+            baseScrollSpeed = 2.5;
+            scrollSpeed = baseScrollSpeed;
+            lastSegmentY = 0;
+
+            kayak = {
+                x: width / 2,
+                y: height * KAYAK_Y_POSITION,
+                width: KAYAK_BASE_WIDTH * KAYAK_SCALE,
+                height: KAYAK_BASE_HEIGHT * KAYAK_SCALE,
+                vx: 0,
+                forwardSpeed: 0,
+                angle: 0
+            };
+
+            river = [];
+            obstacles = [];
+            gates = [];
+            rapids = [];
+            
+            for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
+                generateRiverSegment(y);
+            }
+
+            messageBox.style.display = 'none';
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            gameLoop();
+        }
+
+        // --- Procedural Generation ---
+        function generateRiverSegment(y) {
+            let last = river.length > 0 ? river[0] : { 
+                leftX: (width / 2) - (RIVER_WIDTH_MIN / 2), 
+                rightX: (width / 2) + (RIVER_WIDTH_MIN / 2),
+                width: RIVER_WIDTH_MIN
+            };
+            
+            let newWidth = last.width + (Math.random() - 0.5) * 20;
+            newWidth = Math.max(RIVER_WIDTH_MIN, Math.min(RIVER_WIDTH_MAX, newWidth));
+
+            let centerOffset = (last.leftX + last.rightX) / 2;
+            let newCenter = centerOffset + (Math.random() - 0.5) * (width * TURN_FACTOR);
+            
+            newCenter = Math.max(newWidth / 2 + 20, Math.min(width - newWidth / 2 - 20, newCenter));
+            
+            let newLeftX = newCenter - newWidth / 2;
+            let newRightX = newCenter + newWidth / 2;
+
+            const segment = { y: y, leftX: newLeftX, rightX: newRightX };
+            river.unshift(segment);
+            lastSegmentY = y;
+
+            if (Math.random() < 0.15) {
+                let gateLeftX = newLeftX + Math.random() * (newWidth - GATE_WIDTH);
+                gates.push({
+                    y: y,
+                    x1: gateLeftX,
+                    x2: gateLeftX + GATE_WIDTH,
+                    passed: false
+                });
+            }
+            else if (Math.random() < 0.1) {
+                rapids.push({
+                    y: y,
+                    leftX: newLeftX,
+                    rightX: newRightX,
+                    height: SEGMENT_LENGTH * (3 + Math.random() * 3)
+                });
+            }
+            else if (Math.random() < 0.2) {
+                obstacles.push({
+                    y: y,
+                    x: newLeftX + (Math.random() * newWidth),
+                    size: ROCK_SIZE + (Math.random() - 0.5) * 10
+                });
+            }
+        }
+
+        // --- Game Loop ---
+        function gameLoop() {
+            if (isGameOver) {
+                cancelAnimationFrame(gameLoopId);
+                return;
+            }
+
+            update();
+            draw();
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Update Logic ---
+        function update() {
+            scrollSpeed = baseScrollSpeed + kayak.forwardSpeed;
+
+            // 1. Handle Controls & Paddle Animation
+            if (isStrokingLeft && !paddleAnimationRight.active) { // Can't stroke left if right is active
+                if (!paddleAnimationLeft.active) { // Start a new stroke
+                    paddleAnimationLeft.active = true;
+                    paddleAnimationLeft.progress = 0;
+                }
+                kayak.forwardSpeed += STROKE_POWER;
+                kayak.vx -= TURN_POWER; // Turn left
+            }
+            if (isStrokingRight && !paddleAnimationLeft.active) { // Can't stroke right if left is active
+                if (!paddleAnimationRight.active) { // Start a new stroke
+                    paddleAnimationRight.active = true;
+                    paddleAnimationRight.progress = 0;
+                }
+                kayak.forwardSpeed += STROKE_POWER;
+                kayak.vx += TURN_POWER; // Turn right
+            }
+
+            // Update active animations
+            if (paddleAnimationLeft.active) {
+                paddleAnimationLeft.progress += PADDLE_SPEED;
+                if (paddleAnimationLeft.progress >= Math.PI * 2) { // Cycle complete
+                    paddleAnimationLeft.progress = 0;
+                    if (!isStrokingLeft) { // Stop if button is up
+                        paddleAnimationLeft.active = false;
+                    }
+                }
+            }
+            if (paddleAnimationRight.active) {
+                paddleAnimationRight.progress += PADDLE_SPEED;
+                if (paddleAnimationRight.progress >= Math.PI * 2) { // Cycle complete
+                    paddleAnimationRight.progress = 0;
+                    if (!isStrokingRight) { // Stop if button is up
+                        paddleAnimationRight.active = false;
+                    }
+                }
+            }
+
+
+            // 2. Apply Physics & Friction
+            kayak.forwardSpeed *= FRICTION;
+            kayak.vx *= FRICTION;
+            kayak.x += kayak.vx;
+            kayak.angle = kayak.vx * 0.1;
+            kayak.angle = Math.max(-0.6, Math.min(0.6, kayak.angle));
+
+            // 3. Update River and Object Positions
+            river.forEach(s => s.y += scrollSpeed);
+            obstacles.forEach(o => o.y += scrollSpeed);
+            gates.forEach(g => g.y += scrollSpeed);
+            rapids.forEach(r => r.y += scrollSpeed);
+
+            // 4. Collision Detection - River Banks
+            let currentSegment = getRiverSegmentAtY(kayak.y);
+            if (currentSegment) {
+                if (kayak.x - kayak.width / 2 < currentSegment.leftX) {
+                    kayak.x = currentSegment.leftX + kayak.width / 2;
+                    kayak.vx = 1;
+                    kayak.forwardSpeed *= BANK_FRICTION;
+                }
+                if (kayak.x + kayak.width / 2 > currentSegment.rightX) {
+                    kayak.x = currentSegment.rightX - kayak.width / 2;
+                    kayak.vx = -1;
+                    kayak.forwardSpeed *= BANK_FRICTION;
+                }
+            } else if (!isGameOver) {
+                gameOver("You got lost!");
+            }
+
+            // 5. Collision - Rapids (Apply turbulence)
+            let inRapids = false;
+            rapids.forEach(r => {
+                if (kayak.y > r.y && kayak.y < r.y + r.height &&
+                    kayak.x > r.leftX && kayak.x < r.rightX) {
+                    inRapids = true;
+                }
+            });
+            if (inRapids) {
+                scrollSpeed *= 1.5;
+                kayak.vx += (Math.random() - 0.5) * RAPID_TURBULENCE;
+            }
+
+            // 6. Collision - Rocks
+            obstacles.forEach(rock => {
+                let dx = kayak.x - rock.x;
+                let dy = kayak.y - rock.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < rock.size + kayak.width / 2) {
+                    kayak.forwardSpeed = 0;
+                    kayak.vx = 0;
+                    gameOver("You crashed!");
+                }
+            });
+
+            // 7. Collision - Gates (Scoring)
+            gates.forEach(gate => {
+                if (!gate.passed && gate.y > kayak.y - 10) {
+                    gate.passed = true;
+                    if (kayak.x > gate.x1 && kayak.x < gate.x2) {
+                        score += 10;
+                        scoreEl.textContent = `Score: ${score}`;
+                    } else {
+                        score -= 5;
+                        score = Math.max(0, score);
+                        scoreEl.textContent = `Score: ${score}`;
+                    }
+                }
+            });
+
+            // 8. Clean up old elements
+            river = river.filter(s => s.y < height + SEGMENT_LENGTH * 2);
+            obstacles = obstacles.filter(o => o.y < height + 50);
+            gates = gates.filter(g => g.y < height + 50);
+            rapids = rapids.filter(r => r.y < height + 50);
+
+            // 9. Generate new river segments
+            if (lastSegmentY > -SEGMENT_LENGTH) {
+                generateRiverSegment(lastSegmentY - SEGMENT_LENGTH);
+            }
+        }
+
+        // --- Draw Logic ---
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            
+            // Draw River Banks (Green land)
+            ctx.fillStyle = '#27ae60';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw River Water
+            ctx.beginPath();
+            let firstSegment = river[river.length - 1];
+            if (!firstSegment) return; // Guard clause in case river array is empty
+            ctx.moveTo(firstSegment.leftX, firstSegment.y);
+            for (let i = river.length - 1; i >= 0; i--) {
+                ctx.lineTo(river[i].leftX, river[i].y);
+            }
+            for (let i = 0; i < river.length; i++) {
+                ctx.lineTo(river[i].rightX, river[i].y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = '#3498db';
+            ctx.fill();
+
+            // Draw flowing water lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; // Lighter blue for lines
+            ctx.lineWidth = 1;
+            let lineSpacing = 15;
+            let lineOffset = (performance.now() * 0.05 * scrollSpeed) % lineSpacing; // Animate lines
+
+            for (let i = river.length - 1; i >= 0; i--) {
+                const segment = river[i];
+                if (segment.y < height + SEGMENT_LENGTH && segment.y > -SEGMENT_LENGTH) {
+                    for (let x = segment.leftX + lineSpacing / 2; x < segment.rightX; x += lineSpacing) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, segment.y + lineOffset - SEGMENT_LENGTH);
+                        ctx.lineTo(x, segment.y + lineOffset);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+
+            // Draw Rapids
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            rapids.forEach(r => {
+                if (r.y < height + r.height && r.y + r.height > 0) {
+                    for(let i=0; i<10; i++) {
+                        let foamX = r.leftX + Math.random() * (r.rightX - r.leftX);
+                        let foamY = r.y + Math.random() * r.height;
+                        ctx.beginPath();
+                        ctx.arc(foamX, foamY, Math.random() * 8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            });
+
+            // Draw Gates
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 6;
+            gates.forEach(g => {
+                if (g.y < height + 20 && g.y > -20) {
+                    ctx.beginPath();
+                    ctx.moveTo(g.x1, g.y);
+                    ctx.lineTo(g.x1, g.y + 15);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(g.x2, g.y);
+                    ctx.lineTo(g.x2, g.y + 15);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw Obstacles (Rocks)
+            ctx.fillStyle = '#555';
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            obstacles.forEach(o => {
+                if (o.y < height + o.size && o.y > -o.size) {
+                    ctx.beginPath();
+                    ctx.arc(o.x, o.y, o.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            });
+
+            // Draw Kayak
+            ctx.save();
+            ctx.translate(kayak.x, kayak.y);
+            ctx.rotate(kayak.angle);
+            
+            // Kayak body
+            ctx.fillStyle = '#e67e22'; // Orange kayak
+            ctx.strokeStyle = '#c0392b'; // Darker red outline
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, -kayak.height / 2); // Tip
+            ctx.bezierCurveTo(
+                -kayak.width * 0.6, -kayak.height * 0.3,
+                -kayak.width * 0.6, kayak.height * 0.3,
+                -kayak.width / 2, kayak.height / 2
+            );
+            ctx.lineTo(kayak.width / 2, kayak.height / 2);
+            ctx.bezierCurveTo(
+                kayak.width * 0.6, kayak.height * 0.3,
+                kayak.width * 0.6, -kayak.height * 0.3,
+                0, -kayak.height / 2
+            );
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Cockpit
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.ellipse(0, kayak.height * 0.1, kayak.width * 0.3, kayak.height * 0.2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#555';
+            ctx.stroke();
+
+            // Draw Paddles
+            drawPaddle(-kayak.width * 0.25, kayak.height * 0.1, paddleAnimationRight, 'left');
+            drawPaddle(kayak.width * 0.25, kayak.height * 0.1, paddleAnimationLeft, 'right');
+
+            ctx.restore();
+        }
+
+        function drawPaddle(offsetX, offsetY, animation, side) {
+            if (!animation.active && animation.progress === 0) return;
+
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+
+            const paddleLength = kayak.height * 0.8;
+            const paddleWidth = kayak.width * 0.1;
+            const bladeLength = paddleLength * 0.2;
+            const bladeWidth = paddleWidth * 2;
+            const strokeArc = Math.PI / 1.5; // Angle of the paddle stroke
+
+            let paddleAngle;
+            let rotationDirection = side === 'left' ? 1 : -1; // Left paddle rotates clockwise, right anti-clockwise for visual effect
+
+            if (animation.progress < Math.PI) { // In the water (downward stroke)
+                paddleAngle = rotationDirection * (Math.sin(animation.progress) * strokeArc);
+            } else { // Out of the water (recovery)
+                paddleAngle = rotationDirection * (Math.sin(animation.progress) * strokeArc * 0.5); // Less dramatic recovery
+            }
+
+            // Offset paddle origin to simulate arm movement
+            let armOffset = -kayak.height * 0.1; // Offset backward a bit
+            ctx.rotate(paddleAngle);
+            ctx.translate(0, armOffset);
+            
+
+            // Paddle shaft
+            ctx.fillStyle = '#8B4513'; // Brown wood color
+            ctx.fillRect(-paddleWidth / 2, -paddleLength / 2, paddleWidth, paddleLength);
+
+            // Paddle blade
+            ctx.fillStyle = '#5C3317'; // Darker brown
+            ctx.beginPath();
+            ctx.ellipse(0, paddleLength / 2 - bladeLength / 2, bladeWidth / 2, bladeLength / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+
+        // --- Helper Functions ---
+        function getRiverSegmentAtY(y) {
+            for (let i = 0; i < river.length - 1; i++) {
+                if (y >= river[i].y && y < river[i+1].y) {
+                    let t = (y - river[i].y) / (river[i+1].y - river[i].y);
+        
