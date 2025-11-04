@@ -146,9 +146,9 @@
         const KAYAK_SCALE = 1.0; // Scale for kayak and paddles
 
         const RIVER_WIDTH_MIN = 180;
-        const RIVER_WIDTH_MAX = 350;
+        const RIVER_WIDTH_MAX = 450;
         const SEGMENT_LENGTH = 30;
-        const TURN_FACTOR = 0.12;
+        const TURN_FACTOR = 0.20;
         const GATE_WIDTH = 60;
         const ROCK_SIZE = 12;
         const RAPID_TURBULENCE = 0.3;
@@ -197,7 +197,8 @@
                 width: RIVER_WIDTH_MIN
             };
             
-            let newWidth = last.width + (Math.random() - 0.5) * 20;
+            let widthChange = (Math.random() - 0.5) * 45; // Increased width change factor
+            let newWidth = last.width + widthChange;
             newWidth = Math.max(RIVER_WIDTH_MIN, Math.min(RIVER_WIDTH_MAX, newWidth));
 
             let centerOffset = (last.leftX + last.rightX) / 2;
@@ -220,8 +221,8 @@
                     x2: gateLeftX + GATE_WIDTH,
                     passed: false
                 });
-                // Reset for next gate: minimum 50 segments away, plus a random amount
-                segmentsUntilNextGate = 50 + Math.random() * 50;
+                // Reset for next gate: minimum 15 segments away, plus a random amount
+                segmentsUntilNextGate = 15 + Math.random() * 15;
             }
             else if (Math.random() < 0.1) {
                 rapids.push({
