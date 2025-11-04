@@ -382,25 +382,21 @@
             ctx.fillStyle = '#27ae60';
             ctx.fillRect(0, 0, width, height);
 
-            // Draw River Water
-            ctx.beginPath();
+            // Draw River Water by connecting segments as individual quads
             if (river.length < 2) return;
-
-            // Start path at the top-left of the river.
-            ctx.moveTo(river[0].leftX, river[0].y);
-
-            // Draw a continuous path down the left bank and up the right bank.
-            for (let i = 1; i < river.length; i++) {
-                ctx.lineTo(river[i].leftX, river[i].y);
-            }
-            ctx.lineTo(river[river.length - 1].rightX, river[river.length - 1].y);
-            for (let i = river.length - 2; i >= 0; i--) {
-                ctx.lineTo(river[i].rightX, river[i].y);
-            }
-
-            ctx.closePath();
             ctx.fillStyle = '#3498db';
-            ctx.fill();
+            for (let i = 0; i < river.length - 1; i++) {
+                const p1 = river[i];
+                const p2 = river[i+1];
+
+                ctx.beginPath();
+                ctx.moveTo(p1.leftX, p1.y);
+                ctx.lineTo(p2.leftX, p2.y);
+                ctx.lineTo(p2.rightX, p2.y);
+                ctx.lineTo(p1.rightX, p1.y);
+                ctx.closePath();
+                ctx.fill();
+            }
 
             // Draw flowing water lines
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; // Lighter blue for lines
@@ -551,16 +547,23 @@
 
         // --- Helper Functions ---
         function getRiverSegmentAtY(y) {
-            for (let i = 0; i < river.length - 1; i++) {
-                if (y >= river[i].y && y < river[i+1].y) {
-                    let t = (y - river[i].y) / (river[i+1].y - river[i].y);
-                    let leftX = river[i].leftX + (river[i+1].leftX - river[i].leftX) * t;
-                    let rightX = river[i].rightX + (river[i+1].rightX - river[i].rightX) * t;
+            // Find the two river segments the Y position is between
+            for (let i = river.length - 1; i > 0; i--) {
+                const s1 = river[i];
+                const s2 = river[i-1];
+                if (y >= s1.y && y < s2.y) {
+                    // Linearly interpolate between the two segments
+                    const t = (y - s1.y) / (s2.y - s1.y);
+                    const leftX = s1.leftX + (s2.leftX - s1.leftX) * t;
+                    const rightX = s1.rightX + (s2.rightX - s1.rightX) * t;
                     return { leftX, rightX };
                 }
             }
-            if (river.length > 0) return { leftX: river[0].leftX, rightX: river[0].rightX };
-            return null;
+            // If not found (e.g., off the top of the visible river), return the last known segment
+            if (river.length > 0) {
+                 return { leftX: river[0].leftX, rightX: river[0].rightX };
+            }
+            return null; // Should not happen if the river is generated
         }
 
         function gameOver(reason) {
