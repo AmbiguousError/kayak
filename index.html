@@ -131,6 +131,7 @@
         let width, height; // Canvas dimensions
         let kayak, river, obstacles, gates, rapids;
         let score, scrollSpeed, baseScrollSpeed;
+        let segmentsUntilNextGate;
         let isStrokingLeft = false;
         let isStrokingRight = false;
         let isGameOver = false;
@@ -164,6 +165,7 @@
             scoreEl.textContent = `Score: 0`;
             baseScrollSpeed = 1.5;
             scrollSpeed = baseScrollSpeed;
+            segmentsUntilNextGate = 20; // First gate appears quickly
 
             kayak = {
                 x: width / 2,
@@ -209,7 +211,8 @@
             const segment = { y: y, leftX: newLeftX, rightX: newRightX, width: newWidth };
             river.unshift(segment);
 
-            if (Math.random() < 0.15) {
+            segmentsUntilNextGate--;
+            if (segmentsUntilNextGate <= 0) {
                 let gateLeftX = newLeftX + Math.random() * (newWidth - GATE_WIDTH);
                 gates.push({
                     y: y,
@@ -217,6 +220,8 @@
                     x2: gateLeftX + GATE_WIDTH,
                     passed: false
                 });
+                // Reset for next gate: minimum 50 segments away, plus a random amount
+                segmentsUntilNextGate = 50 + Math.random() * 50;
             }
             else if (Math.random() < 0.1) {
                 rapids.push({
