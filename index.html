@@ -120,8 +120,7 @@
 
     <script>
         // --- Setup ---
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        let canvas, ctx;
         const scoreEl = document.getElementById('score');
         const messageBox = document.getElementById('messageBox');
         const messageText = document.getElementById('messageText');
@@ -152,8 +151,8 @@
         const GATE_WIDTH = 60;
         const ROCK_SIZE = 12;
         const RAPID_TURBULENCE = 0.3;
-        const STROKE_POWER = 0.06;
-        const TURN_POWER = 0.15;
+        const STROKE_POWER = 0.08;
+        const TURN_POWER = 0.2;
         const FRICTION = 0.98;
         const BANK_FRICTION = 0.9;
         const PADDLE_SPEED = 0.08; // Speed of paddle animation (Slowed down)
@@ -182,13 +181,11 @@
             gates = [];
             rapids = [];
             
-            for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
-                generateRiverSegment(y);
-            }
-
             messageBox.style.display = 'none';
-            if (gameLoopId) cancelAnimationFrame(gameLoopId);
-            gameLoop();
+            if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId);
+                gameLoopId = undefined;
+            }
         }
 
         // --- Procedural Generation ---
@@ -385,20 +382,21 @@
             ctx.fillStyle = '#27ae60';
             ctx.fillRect(0, 0, width, height);
 
-            // Draw River Water
-            ctx.beginPath();
-            let firstSegment = river[river.length - 1];
-            if (!firstSegment) return; // Guard clause in case river array is empty
-            ctx.moveTo(firstSegment.leftX, firstSegment.y);
-            for (let i = river.length - 1; i >= 0; i--) {
-                ctx.lineTo(river[i].leftX, river[i].y);
-            }
-            for (let i = 0; i < river.length; i++) {
-                ctx.lineTo(river[i].rightX, river[i].y);
-            }
-            ctx.closePath();
+            // Draw River Water by connecting segments as individual quads
+            if (river.length < 2) return;
             ctx.fillStyle = '#3498db';
-            ctx.fill();
+            for (let i = 0; i < river.length - 1; i++) {
+                const p1 = river[i];
+                const p2 = river[i+1];
+
+                ctx.beginPath();
+                ctx.moveTo(p1.leftX, p1.y);
+                ctx.lineTo(p2.leftX, p2.y);
+                ctx.lineTo(p2.rightX, p2.y);
+                ctx.lineTo(p1.rightX, p1.y);
+                ctx.closePath();
+                ctx.fill();
+            }
 
             // Draw flowing water lines
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; // Lighter blue for lines
@@ -534,10 +532,13 @@
             ctx.fillStyle = '#8B4513'; // Brown wood color
             ctx.fillRect(-paddleWidth / 2, -paddleLength / 2, paddleWidth, paddleLength);
 
-            // Paddle blade
+            // Paddle blades
             ctx.fillStyle = '#5C3317'; // Darker brown
             ctx.beginPath();
             ctx.ellipse(0, paddleLength / 2 - bladeLength / 2, bladeWidth / 2, bladeLength / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(0, -paddleLength / 2 + bladeLength / 2, bladeWidth / 2, bladeLength / 2, 0, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.restore();
@@ -546,7 +547,124 @@
 
         // --- Helper Functions ---
         function getRiverSegmentAtY(y) {
-            for (let i = 0; i < river.length - 1; i++) {
-                if (y >= river[i].y && y < river[i+1].y) {
-                    let t = (y - river[i].y) / (river[i+1].y - river[i].y);
+            // Find the two river segments the Y position is between
+            for (let i = river.length - 1; i > 0; i--) {
+                const s1 = river[i];
+                const s2 = river[i-1];
+                if (y >= s1.y && y < s2.y) {
+                    // Linearly interpolate between the two segments
+                    const t = (y - s1.y) / (s2.y - s1.y);
+                    const leftX = s1.leftX + (s2.leftX - s1.leftX) * t;
+                    const rightX = s1.rightX + (s2.rightX - s1.rightX) * t;
+                    return { leftX, rightX };
+                }
+            }
+            // If not found (e.g., off the top of the visible river), return the last known segment
+            if (river.length > 0) {
+                 return { leftX: river[0].leftX, rightX: river[0].rightX };
+            }
+            return null; // Should not happen if the river is generated
+        }
+
+        function gameOver(reason) {
+            if (isGameOver) return;
+            isGameOver = true;
+            messageText.textContent = `${reason} - Final Score: ${score}`;
+            messageBox.style.display = 'block';
+            if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId); // Stop the game loop
+                gameLoopId = undefined; // Clear the loop ID
+            }
+        }
+
+        // --- Game Start and Resize ---
+
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            if (kayak) {
+                 kayak.y = height * KAYAK_Y_POSITION;
+            }
+        }
+
+        function startGame() {
+            canvas = document.getElementById('gameCanvas');
+            if (!canvas) {
+                console.error("Canvas element not found!");
+                return;
+            }
+            ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error("Failed to get canvas context!");
+                return;
+            }
+
+            // Set dimensions
+            resizeCanvas();
+
+            // Guard against 0 dimensions
+            if (width === 0 || height === 0) {
+                console.warn("Canvas dimensions are 0, retrying in 100ms...");
+                setTimeout(startGame, 100); // Try again
+                return;
+            }
+
+            // Stop any existing loop
+            if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId);
+                gameLoopId = undefined;
+            }
+
+            isGameOver = false; // Reset state
+            init(); // This will setup kayak, river, etc. and start the gameLoop
+
+            // Generate the initial river segments now that width and height are set
+            for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
+                generateRiverSegment(y);
+            }
+
+            // Start the game loop now that everything is initialized
+            gameLoop();
+        }
+
+        // --- Event Listeners ---
+        function addControlListener(button, strokeSide) {
+            const startStroke = (e) => {
+                e.preventDefault();
+                if (strokeSide === 'left') isStrokingLeft = true;
+                if (strokeSide === 'right') isStrokingRight = true;
+            };
+            const endStroke = (e) => {
+                e.preventDefault();
+                if (strokeSide === 'left') isStrokingLeft = false;
+                if (strokeSide === 'right') isStrokingRight = false;
+            };
+
+            button.addEventListener('touchstart', startStroke, { passive: false });
+            button.addEventListener('touchend', endStroke, { passive: false });
+            button.addEventListener('touchcancel', endStroke, { passive: false });
+
+            button.addEventListener('mousedown', startStroke, { passive: false });
+            button.addEventListener('mouseup', endStroke, { passive: false });
+            button.addEventListener('mouseleave', endStroke, { passive: false });
+        }
+
+        addControlListener(leftButton, 'left'); // Left button turns left
+        addControlListener(rightButton, 'right'); // Right button turns right
+
+        window.addEventListener('resize', resizeCanvas); // Just resize
+
+        restartButton.addEventListener('click', () => {
+             messageBox.style.display = 'none';
+             startGame(); // Call the new start function
+        });
+
+        // REMOVED window.onload event
         
+        // Start the game once the DOM is fully loaded.
+        window.addEventListener('DOMContentLoaded', (event) => {
+            startGame();
+        });
+    </script>
+</body>
+</html>
