@@ -120,8 +120,7 @@
 
     <script>
         // --- Setup ---
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        let canvas, ctx;
         const scoreEl = document.getElementById('score');
         const messageBox = document.getElementById('messageBox');
         const messageText = document.getElementById('messageText');
@@ -152,8 +151,8 @@
         const GATE_WIDTH = 60;
         const ROCK_SIZE = 12;
         const RAPID_TURBULENCE = 0.3;
-        const STROKE_POWER = 0.06;
-        const TURN_POWER = 0.15;
+        const STROKE_POWER = 0.08;
+        const TURN_POWER = 0.2;
         const FRICTION = 0.98;
         const BANK_FRICTION = 0.9;
         const PADDLE_SPEED = 0.08; // Speed of paddle animation (Slowed down)
@@ -182,10 +181,6 @@
             gates = [];
             rapids = [];
             
-            for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
-                generateRiverSegment(y);
-            }
-
             messageBox.style.display = 'none';
             if (gameLoopId) cancelAnimationFrame(gameLoopId);
             gameLoop();
@@ -387,15 +382,20 @@
 
             // Draw River Water
             ctx.beginPath();
-            let firstSegment = river[river.length - 1];
-            if (!firstSegment) return; // Guard clause in case river array is empty
-            ctx.moveTo(firstSegment.leftX, firstSegment.y);
-            for (let i = river.length - 1; i >= 0; i--) {
+            if (river.length < 2) return;
+
+            // Start path at the top-left of the river.
+            ctx.moveTo(river[0].leftX, river[0].y);
+
+            // Draw a continuous path down the left bank and up the right bank.
+            for (let i = 1; i < river.length; i++) {
                 ctx.lineTo(river[i].leftX, river[i].y);
             }
-            for (let i = 0; i < river.length; i++) {
+            ctx.lineTo(river[river.length - 1].rightX, river[river.length - 1].y);
+            for (let i = river.length - 2; i >= 0; i--) {
                 ctx.lineTo(river[i].rightX, river[i].y);
             }
+
             ctx.closePath();
             ctx.fillStyle = '#3498db';
             ctx.fill();
@@ -534,10 +534,13 @@
             ctx.fillStyle = '#8B4513'; // Brown wood color
             ctx.fillRect(-paddleWidth / 2, -paddleLength / 2, paddleWidth, paddleLength);
 
-            // Paddle blade
+            // Paddle blades
             ctx.fillStyle = '#5C3317'; // Darker brown
             ctx.beginPath();
             ctx.ellipse(0, paddleLength / 2 - bladeLength / 2, bladeWidth / 2, bladeLength / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(0, -paddleLength / 2 + bladeLength / 2, bladeWidth / 2, bladeLength / 2, 0, 0, Math.PI * 2);
             ctx.fill();
 
             ctx.restore();
@@ -580,6 +583,17 @@
         }
 
         function startGame() {
+            canvas = document.getElementById('gameCanvas');
+            if (!canvas) {
+                console.error("Canvas element not found!");
+                return;
+            }
+            ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error("Failed to get canvas context!");
+                return;
+            }
+
             // Set dimensions
             resizeCanvas();
 
@@ -600,6 +614,11 @@
 
             isGameOver = false; // Reset state
             init(); // This will setup kayak, river, etc. and start the gameLoop
+
+            // Generate the initial river segments now that width and height are set
+            for (let y = height + SEGMENT_LENGTH; y > -SEGMENT_LENGTH; y -= SEGMENT_LENGTH) {
+                generateRiverSegment(y);
+            }
         }
 
         // --- Event Listeners ---
