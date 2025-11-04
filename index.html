@@ -352,10 +352,6 @@
                     if (kayak.x > gate.x1 && kayak.x < gate.x2) {
                         score += 10;
                         scoreEl.textContent = `Score: ${score}`;
-                    } else {
-                        score -= 5;
-                        score = Math.max(0, score);
-                        scoreEl.textContent = `Score: ${score}`;
                     }
                 }
             });
