@@ -67,7 +67,7 @@
         }
         #startScreen { display: block; }
         #gameOverScreen { display: none; }
-        
+
         .key-hint {
             display: inline-block;
             background: #eee;
@@ -139,10 +139,10 @@
     // Game Constants
     const LAP_COUNT = 3;
     const FPS = 60;
-    const DRAG = 0.96;      // Water resistance
-    const TURN_DRAG = 0.9; // Speed loss when turning hard
-    const PADDLE_POWER = 0.6; // Forward thrust per tap
-    const TURN_RATE = 0.07;   // How fast you turn per tap
+    const DRAG = 0.97;      // Water resistance
+    const TURN_DRAG = 0.92; // Speed loss when turning hard
+    const PADDLE_POWER = 1.0; // Forward thrust per tap
+    const TURN_RATE = 0.12;   // How fast you turn per tap
     const MAX_SPEED = 12;
     const AI_SPEED_MOD = 0.96; // AI speed relative to potential max speed (tweaked for difficulty)
 
@@ -170,10 +170,11 @@
             this.vy = 0;
             this.speed = 0;
             this.isAi = isAi;
-            
+
             // Race data
             this.currentLap = 1;
             this.nextWaypointIndex = 1; // Start aiming for second waypoint
+            this.nextGateIndex = 0;
             this.lapTimes = [];
             this.currentLapStart = 0;
             this.finished = false;
@@ -193,11 +194,10 @@
 
         update() {
             if (this.finished) {
-                 this.speed *= 0.95; // Slow down after finish
-                 this.x += this.vx; this.y += this.vy;
-                 return;
+                this.vx = 0;
+                this.vy = 0;
+                return;
             }
-
             // --- Physics ---
             // Apply velocity to position
             this.x += this.vx;
@@ -206,7 +206,7 @@
             // Calculate speed for drag application
             this.speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
 
-            // Apply water drag
+    // Apply water drag
             this.vx *= DRAG;
             this.vy *= DRAG;
 
@@ -222,21 +222,24 @@
             if (this.paddleCooldownRight > 0) this.paddleCooldownRight--;
 
             // --- AI Logic ---
-            if (this.isAi) {
+            if (this.isAi || this.finished) {
                 this.runAI();
             }
 
             // --- Track Collision & Lap Counting ---
             this.checkTrackLimits();
             this.checkWaypoints();
+            this.checkSlalomGates();
         }
 
         paddle(side) {
-            if (GAME_STATE !== 'racing' || this.finished) return;
+            if (GAME_STATE !== 'racing' && !this.finished) return;
+            if (this.finished) return;
+
 
             // "Super Sprint" mechanic: Rhythm gives speed.
             // Holding down gives turning but less speed efficiency eventually.
-            
+
             let thrust = PADDLE_POWER;
             let turn = TURN_RATE;
 
@@ -263,11 +266,14 @@
         }
 
         runAI() {
-            // Simple steering behavior towards next waypoint
-            let target = WAYPOINTS[this.nextWaypointIndex];
-            
+            if (this.finished) {
+                this.speed *= 0.95;
+            }
+            // Simple steering behavior towards next slalom gate
+            let target = slalomGates[this.nextGateIndex % slalomGates.length];
+
             // Aim for waypoint + their personal offset (so they use full track width)
-            // We need the perpendicular vector to the track direction to apply offset correctly, 
+            // We need the perpendicular vector to the track direction to apply offset correctly,
             // but for a simple oval, just aiming at a generic offset works okayish.
             let tx = target.x + Math.cos(this.angle + Math.PI/2) * this.targetOffset * 0.1; // Simplified offset
             let ty = target.y + Math.sin(this.angle + Math.PI/2) * this.targetOffset * 0.1;
@@ -278,7 +284,7 @@
 
             // Desired angle to target
             let desiredAngle = Math.atan2(dy, dx);
-            
+
             // Difference between current heading and desired
             let deltaAngle = desiredAngle - this.angle;
             // Normalize angle to -PI to PI
@@ -305,12 +311,12 @@
             let dx = target.x - this.x;
             let dy = target.y - this.y;
             // AI needs smaller radius to ensure they don't cut too much, player can be looser
-            let hitDist = this.isAi ? 100 : 150; 
+            let hitDist = this.isAi ? 100 : 150;
 
             if (dx*dx + dy*dy < hitDist * hitDist) {
                 // Waypoint reached
                 this.nextWaypointIndex = (this.nextWaypointIndex + 1) % WAYPOINTS.length;
-                
+
                 // Lap completion check (Passing waypoint 0)
                 if (this.nextWaypointIndex === 1) { // Just passed 0, now aiming for 1
                     this.completeLap();
@@ -339,12 +345,37 @@
             }
         }
 
+        checkSlalomGates() {
+            if (slalomGates.length === 0) return;
+            let targetGate = slalomGates[this.nextGateIndex % slalomGates.length];
+            let dx = targetGate.x - this.x;
+            let dy = targetGate.y - this.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 40) { // If close enough to the gate center
+                this.nextGateIndex++;
+            } else {
+                // Check if the player has passed the gate
+                const p1 = WAYPOINTS[this.nextWaypointIndex];
+                const p2 = WAYPOINTS[(this.nextWaypointIndex + 1) % WAYPOINTS.length];
+                const segmentAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const gateAngle = Math.atan2(targetGate.y - this.y, targetGate.x - this.x);
+                let angleDiff = segmentAngle - gateAngle;
+                while (angleDiff <= -Math.PI) angleDiff += Math.PI * 2;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+                if (dist > 100 && Math.abs(angleDiff) > Math.PI / 2) {
+                    this.speed *= 0.8; // Penalty for missing a gate
+                }
+            }
+        }
+
         checkTrackLimits() {
-            // Very simple collision: find closest point on track center-line, 
+            // Very simple collision: find closest point on track center-line,
             // if distance > width/2, push back.
-            // For this V1, we'll use a simpler radial check from waypoints if complex math is too slow, 
+            // For this V1, we'll use a simpler radial check from waypoints if complex math is too slow,
             // but let's try a segment implementation.
-            
+
             let closestDist = Infinity;
             let closestPoint = {x: this.x, y: this.y};
             let trackNormal = {x:0, y:0};
@@ -352,7 +383,7 @@
             for (let i = 0; i < WAYPOINTS.length; i++) {
                 let p1 = WAYPOINTS[i];
                 let p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
-                
+
                 // Get point on line segment closest to canoe
                 let res = getClosestPointOnSegment(p1, p2, {x:this.x, y:this.y});
                 if (res.dist < closestDist) {
@@ -387,11 +418,11 @@
             ctx.fillStyle = this.color;
             ctx.beginPath();
             // Draw an elongated oval shape
-            ctx.moveTo(15, 0); 
+            ctx.moveTo(15, 0);
             ctx.bezierCurveTo(15, 7, -15, 7, -15, 0);
             ctx.bezierCurveTo(-15, -7, 15, -7, 15, 0);
             ctx.fill();
-            
+
             // Outline for visibility
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 1;
@@ -435,6 +466,8 @@
     let player;
     let racers = [];
     let camera = {x: 0, y: 0, zoom: 1};
+    let slalomGates = [];
+    const GATE_COUNT = 10;
 
     // --- Initialization ---
     function initGame() {
@@ -445,7 +478,7 @@
         // Determine start positions (grid near waypoint 0)
         const startX = WAYPOINTS[0].x;
         const startY = WAYPOINTS[0].y;
-        
+
         racers = [
             new Canoe(startX, startY - 20, '#ffdd00'), // Player (Yellow)
             new Canoe(startX - 40, startY + 20, '#ff3333', true), // AI Red
@@ -458,19 +491,68 @@
         camera.x = player.x - canvas.width / 2;
         camera.y = player.y - canvas.height / 2;
 
+        generateSlalomGates();
         updateHUD();
+    }
+
+    function generateSlalomGates() {
+        slalomGates = [];
+        let trackLength = 0;
+        const segments = [];
+
+        // Calculate total track length and segment lengths
+        for (let i = 0; i < WAYPOINTS.length; i++) {
+            const p1 = WAYPOINTS[i];
+            const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+            const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            segments.push({ p1, p2, length });
+            trackLength += length;
+        }
+
+        const gateSpacing = trackLength / GATE_COUNT;
+
+        let currentDist = 0;
+        let segmentIndex = 0;
+
+        for (let i = 0; i < GATE_COUNT; i++) {
+            let gateDist = (i + 0.5) * gateSpacing; // Place gates in the middle of their segment
+
+            while (gateDist > currentDist + segments[segmentIndex].length) {
+                currentDist += segments[segmentIndex].length;
+                segmentIndex++;
+            }
+
+            const distIntoSegment = gateDist - currentDist;
+            const segment = segments[segmentIndex];
+            const t = distIntoSegment / segment.length;
+
+            const gateX = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
+            const gateY = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
+
+            const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
+            const perpAngle = angle + Math.PI / 2;
+
+            const offset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.7);
+
+            const pole1X = gateX + Math.cos(perpAngle) * (offset - 20);
+            const pole1Y = gateY + Math.sin(perpAngle) * (offset - 20);
+            const pole2X = gateX + Math.cos(perpAngle) * (offset + 20);
+            const pole2Y = gateY + Math.sin(perpAngle) * (offset + 20);
+
+            slalomGates.push({ x: gateX, y: gateY, p1: {x: pole1X, y: pole1Y}, p2: {x: pole2X, y: pole2Y} });
+        }
     }
 
     function startGame() {
         document.getElementById('startScreen').style.display = 'none';
         document.getElementById('gameOverScreen').style.display = 'none';
-        
+
         initGame();
-        
+
         GAME_STATE = 'racing';
         raceStartTime = Date.now();
         racers.forEach(r => r.currentLapStart = raceStartTime);
-        
+
         requestAnimationFrame(gameLoop);
     }
 
@@ -482,7 +564,7 @@
 
     function endGame() {
         GAME_STATE = 'finished';
-        
+
         // Calculate final position
         let finishOrder = racers.filter(r => r.finished).sort((a,b) => {
              // Sort by who finished first (based on their last lap end time)
@@ -502,19 +584,19 @@
                  if (aiTotalTime < playerTotalTime) playerPos++;
             }
         }
-        
+
         // Format Place
         let suffix = 'th';
         if(playerPos===1) suffix='st';
         else if(playerPos===2) suffix='nd';
         else if(playerPos===3) suffix='rd';
-        
+
         document.getElementById('finalPosition').innerText = `Placed: ${playerPos}${suffix}`;
-        
+
         // Format Times
         let totalTime = player.lapTimes.reduce((a, b) => a + b, 0);
         let bestLap = Math.min(...player.lapTimes);
-        
+
         document.getElementById('finalTime').innerText = formatTime(totalTime);
         document.getElementById('bestLap').innerText = formatTime(bestLap);
         document.getElementById('gameOverScreen').style.display = 'block';
@@ -540,11 +622,14 @@
         // Update all racers
         racers.forEach(racer => racer.update());
 
+        // Check for collisions between canoes
+        checkCanoeCollisions();
+
         // Update Camera to follow player smoothly
         // Target camera position is centered on player
         let targetCamX = player.x - canvas.width / 2;
         let targetCamY = player.y - canvas.height / 2;
-        
+
         // Simple lerp for smooth camera
         camera.x += (targetCamX - camera.x) * 0.1;
         camera.y += (targetCamY - camera.y) * 0.1;
@@ -568,12 +653,48 @@
 
         racers.sort((a, b) => b.raceScore - a.raceScore);
         let playerPos = racers.indexOf(player) + 1;
-        
+
         let suffix = 'th';
         if(playerPos===1) suffix='st';
         else if(playerPos===2) suffix='nd';
         else if(playerPos===3) suffix='rd';
         document.getElementById('positionDisplay').innerText = `POS: ${playerPos}${suffix}`;
+    }
+
+    function checkCanoeCollisions() {
+        const CANOE_RADIUS = 10; // Approximate radius for collision
+        for (let i = 0; i < racers.length; i++) {
+            for (let j = i + 1; j < racers.length; j++) {
+                const c1 = racers[i];
+                const c2 = racers[j];
+
+                const dx = c2.x - c1.x;
+                const dy = c2.y - c1.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < CANOE_RADIUS * 2) {
+                    // Collision detected
+                    const overlap = (CANOE_RADIUS * 2) - distance;
+                    const angle = Math.atan2(dy, dx);
+
+                    // Move them apart
+                    const moveX = (overlap / 2) * Math.cos(angle);
+                    const moveY = (overlap / 2) * Math.sin(angle);
+
+                    c1.x -= moveX;
+                    c1.y -= moveY;
+                    c2.x += moveX;
+                    c2.y += moveY;
+
+                    // Apply a small bounce
+                    const bounce = 0.1;
+                    c1.vx -= moveX * bounce;
+                    c1.vy -= moveY * bounce;
+                    c2.vx += moveX * bounce;
+                    c2.vy += moveY * bounce;
+                }
+            }
+        }
     }
 
     function updateHUD() {
@@ -584,8 +705,8 @@
         let minutes = Math.floor(ms / 60000);
         let seconds = Math.floor((ms % 60000) / 1000);
         let centiseconds = Math.floor((ms % 1000) / 10);
-        return (minutes < 10 ? "0" : "") + minutes + ":" + 
-               (seconds < 10 ? "0" : "") + seconds + "." + 
+        return (minutes < 10 ? "0" : "") + minutes + ":" +
+               (seconds < 10 ? "0" : "") + seconds + "." +
                (centiseconds < 10 ? "0" : "") + centiseconds;
     }
 
@@ -617,6 +738,9 @@
 
         // Draw Finish Line (At Waypoint 0)
         drawFinishLine();
+
+        // Draw Slalom Gates
+        drawSlalomGates();
 
         // Draw Racers
         racers.forEach(racer => racer.draw());
@@ -677,13 +801,30 @@
         ctx.restore();
     }
 
+    function drawSlalomGates() {
+        slalomGates.forEach((gate, index) => {
+            const isNextGate = (index === player.nextGateIndex % slalomGates.length);
+            const poleRadius = isNextGate ? 8 : 5;
+            // Draw the poles
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(gate.p1.x, gate.p1.y, poleRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'yellow';
+            ctx.beginPath();
+            ctx.arc(gate.p2.x, gate.p2.y, poleRadius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
     // --- Input Handling ---
     const keys = {};
 
     window.addEventListener('keydown', (e) => {
         keys[e.key] = true;
         if (GAME_STATE !== 'racing') return;
-        
+
         if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
             player.paddle('left');
         }
@@ -705,7 +846,7 @@
         e.preventDefault(); // Prevents scrolling/zooming double tap issues
         if (GAME_STATE === 'racing') player.paddle('left');
     }, { passive: false });
-    
+
     rightZone.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (GAME_STATE === 'racing') player.paddle('right');
