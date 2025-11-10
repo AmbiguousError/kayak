@@ -6,6 +6,8 @@
     <title>Super Canoe River Run</title>
     <!-- Bootstrap for standard UI elements -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- TinyColor for color manipulation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tinycolor/1.4.1/tinycolor.min.js"></script>
     <style>
         body {
             background-color: #333;
@@ -159,6 +161,35 @@
         {x: 500, y: 900}, {x: 200, y: 800}, {x: 100, y: 500}
     ];
 
+    let trackLength = 0;
+    const trackSegments = [];
+    for (let i = 0; i < WAYPOINTS.length; i++) {
+        const p1 = WAYPOINTS[i];
+        const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+        const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        trackSegments.push({ p1, p2, length });
+        trackLength += length;
+    }
+
+    function getPointAlongTrack(distance) {
+        let currentDist = 0;
+        let segmentIndex = 0;
+        while(currentDist + trackSegments[segmentIndex].length < distance) {
+            currentDist += trackSegments[segmentIndex].length;
+            segmentIndex++;
+        }
+
+        const distIntoSegment = distance - currentDist;
+        const segment = trackSegments[segmentIndex];
+        const t = distIntoSegment / segment.length;
+
+        const x = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
+        const y = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
+        const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
+
+        return { x, y, angle };
+    }
+
     // --- Entities ---
     class Canoe {
         constructor(x, y, color, isAi = false) {
@@ -186,8 +217,8 @@
             // AI specific
             if (isAi) {
                 // Give AI slightly different stats so they don't stack perfectly
-                // Reduced skill to slow them down for ~20s+ laps
-                this.aiSkill = 0.80 + Math.random() * 0.05; // 0.80 to 0.85
+                // Reduced skill to slow them down for ~25s+ laps
+                this.aiSkill = 0.70 + Math.random() * 0.05; // 0.70 to 0.75
                 this.targetOffset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.6); // Don't all aim for exact center
             }
         }
@@ -321,8 +352,8 @@
             if (Math.abs(deltaAngle) < 0.1) {
                 // Aiming correctly, paddle both sides for speed!
                 // Increased cooldown to slow down AI paddling rate.
-                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 15 + Math.random()*10; }
-                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 15 + Math.random()*10; }
+                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 20 + Math.random()*10; }
+                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 20 + Math.random()*10; }
             } else if (deltaAngle < 0) {
                 // Need to turn left
                 this.paddle('left');
@@ -429,36 +460,63 @@
             ctx.translate(this.x, this.y);
             ctx.rotate(this.angle);
 
-            // Canoe Body
-            ctx.fillStyle = this.color;
+            // Canoe Body with gradient for depth
+            const gradient = ctx.createLinearGradient(-15, 0, 15, 0);
+            gradient.addColorStop(0, this.color);
+            gradient.addColorStop(0.5, tinycolor(this.color).darken(10).toString());
+            gradient.addColorStop(1, this.color);
+
+            ctx.fillStyle = gradient;
             ctx.beginPath();
-            // Draw an elongated oval shape
             ctx.moveTo(15, 0);
             ctx.bezierCurveTo(15, 7, -15, 7, -15, 0);
             ctx.bezierCurveTo(-15, -7, 15, -7, 15, 0);
             ctx.fill();
 
-            // Outline for visibility
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 1;
+            // Wooden gunwales (rim of the canoe)
+            ctx.strokeStyle = '#8B4513'; // SaddleBrown
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
-            // Rower (just a dot for head)
+            // Rower with a simple body
             ctx.fillStyle = '#f0d0b0'; // Skin tone
             ctx.beginPath();
-            ctx.arc(-2, 0, 4, 0, Math.PI * 2);
+            ctx.arc(-2, 0, 4, 0, Math.PI * 2); // Head
             ctx.fill();
+            ctx.fillStyle = this.color; // Shirt color matches canoe
+            ctx.fillRect(-6, -3, 8, 6); // Torso
 
-            // Paddle (visual only, animates when velocity is high)
-            if (this.speed > 1) {
-                 // Simple paddle flicker
-                 let paddleSide = Math.sin(Date.now() / 100) > 0 ? 1 : -1;
-                 ctx.strokeStyle = '#654321';
-                 ctx.lineWidth = 2;
+            // Paddle animation
+            const paddleCycle = Math.sin(Date.now() * 0.01 * this.speed); // Cycle based on speed
+            const paddleSide = paddleCycle > 0 ? 1 : -1;
+            const paddleAngle = paddleCycle * 0.5; // Angle of the paddle shaft
+
+            if (this.speed > 0.5) {
+                 ctx.strokeStyle = '#654321'; // Dark brown for paddle
+                 ctx.lineWidth = 1.5;
+                 ctx.save();
+                 ctx.translate(-2, 6 * paddleSide); // Position paddle near rower
+                 ctx.rotate(paddleAngle);
+                 // Shaft
                  ctx.beginPath();
-                 ctx.moveTo(0, 5 * paddleSide);
-                 ctx.lineTo(-5, 12 * paddleSide);
+                 ctx.moveTo(0, 0);
+                 ctx.lineTo(0, 8);
                  ctx.stroke();
+                 // Blade
+                 ctx.fillStyle = '#654321';
+                 ctx.fillRect(-1.5, 8, 3, 4);
+                 ctx.restore();
+            }
+
+            // Wake effect
+            if(this.speed > 3) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(-15, 3);
+                ctx.lineTo(-20 - this.speed, 0);
+                ctx.lineTo(-15, -3);
+                ctx.stroke();
             }
 
             ctx.restore();
@@ -883,6 +941,20 @@
         ctx.strokeStyle = '#c2b280'; // Sand color
         ctx.stroke();
 
+        // Add some texture to the shore
+        for(let i = 0; i < 200; i++) {
+            const point = getPointAlongTrack(Math.random() * trackLength);
+            const offsetAngle = point.angle + Math.PI / 2;
+            const offsetDist = TRACK_WIDTH/2 + 5 + Math.random() * 10;
+            const x = point.x + Math.cos(offsetAngle) * offsetDist * (Math.random() < 0.5 ? 1 : -1);
+            const y = point.y + Math.sin(offsetAngle) * offsetDist * (Math.random() < 0.5 ? 1 : -1);
+            ctx.fillStyle = `rgba(0,0,0,${0.05 + Math.random() * 0.05})`;
+            ctx.beginPath();
+            ctx.arc(x, y, Math.random() * 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+
         // 2. Draw Water
         ctx.beginPath();
         ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
@@ -891,6 +963,24 @@
         ctx.lineWidth = TRACK_WIDTH;
         ctx.strokeStyle = '#0077be'; // Water color
         ctx.stroke();
+
+        // Water surface animation
+        ctx.save();
+        ctx.clip(); // Clip to the water path
+        const waveSpeed = 0.0005;
+        const waveHeight = 2;
+        const waveFreq = 0.1;
+        for (let i=0; i < 20; i++) {
+            const waveOffset = Math.sin(Date.now() * waveSpeed * (1 + i*0.1) + i*10) * waveHeight;
+            ctx.strokeStyle = `rgba(255,255,255,${0.05 + Math.random()*0.1})`;
+            ctx.lineWidth = 1 + Math.random();
+            ctx.beginPath();
+            ctx.moveTo(-1000 + waveOffset, i * 100);
+            ctx.lineTo(3000 + waveOffset, i * 100);
+            ctx.stroke();
+        }
+        ctx.restore();
+
 
         // 3. Draw Centerline (faint)
         ctx.strokeStyle = 'rgba(255,255,255,0.2)';
