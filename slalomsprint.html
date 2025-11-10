@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Super Canoe Sprint</title>
+    <title>Super Canoe Slalom Sprint</title>
     <!-- Bootstrap for standard UI elements -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -39,8 +39,9 @@
             z-index: 2;
         }
         #lapCounter { top: 10px; left: 20px; font-size: 24px; }
+        #gateCounter { top: 50px; left: 20px; font-size: 24px; }
         #timer { top: 10px; right: 20px; font-size: 24px; font-family: monospace; }
-        #positionDisplay { top: 50px; left: 20px; font-size: 32px; color: yellow; }
+        #positionDisplay { top: 50px; right: 20px; font-size: 32px; color: yellow; }
 
         /* Mobile Touch Zones */
         .touch-zone {
@@ -87,6 +88,7 @@
 
     <!-- HUD -->
     <div id="lapCounter" class="hud">LAP: 1 / 3</div>
+    <div id="gateCounter" class="hud">GATE: 0 / 10</div>
     <div id="timer" class="hud">00:00.00</div>
     <div id="positionDisplay" class="hud">POS: 4th</div>
 
@@ -96,7 +98,7 @@
 
     <!-- Start Screen -->
     <div id="startScreen" class="game-menu">
-        <h1 class="display-4 fw-bold text-warning mb-3">SUPER CANOE SPRINT</h1>
+        <h1 class="display-4 fw-bold text-warning mb-3">SUPER CANOE SLALOM SPRINT</h1>
         <p class="lead">Race 3 laps against the AI!</p>
         <div class="my-4">
             <h5>How to Race:</h5>
@@ -142,9 +144,8 @@
     const DRAG = 0.97;      // Water resistance
     const TURN_DRAG = 0.92; // Speed loss when turning hard
     const PADDLE_POWER = 1.0; // Forward thrust per tap
-    const TURN_RATE = 0.12;   // How fast you turn per tap
+    const TURN_RATE = 0.15;   // How fast you turn per tap
     const MAX_SPEED = 12;
-    const AI_SPEED_MOD = 0.96; // AI speed relative to potential max speed (tweaked for difficulty)
 
     let raceStartTime = 0;
     let raceTime = 0;
@@ -194,8 +195,11 @@
 
         update() {
             if (this.finished) {
-                this.vx = 0;
-                this.vy = 0;
+                // Finished racers should slow down gradually and do nothing else
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                this.x += this.vx;
+                this.y += this.vy;
                 return;
             }
             // --- Physics ---
@@ -366,6 +370,8 @@
 
                 if (dist > 100 && Math.abs(angleDiff) > Math.PI / 2) {
                     this.speed *= 0.8; // Penalty for missing a gate
+                    this.paddleCooldownLeft = 60; // Stun effect
+                    this.paddleCooldownRight = 60;
                 }
             }
         }
@@ -699,6 +705,7 @@
 
     function updateHUD() {
          document.getElementById('lapCounter').innerText = `LAP: ${Math.min(player.currentLap, LAP_COUNT)} / ${LAP_COUNT}`;
+         document.getElementById('gateCounter').innerText = `GATE: ${player.nextGateIndex} / ${GATE_COUNT * LAP_COUNT}`;
     }
 
     function formatTime(ms) {
@@ -805,13 +812,14 @@
         slalomGates.forEach((gate, index) => {
             const isNextGate = (index === player.nextGateIndex % slalomGates.length);
             const poleRadius = isNextGate ? 8 : 5;
+            const hasPassed = index < player.nextGateIndex;
             // Draw the poles
-            ctx.fillStyle = 'red';
+            ctx.fillStyle = hasPassed ? 'green' : 'red';
             ctx.beginPath();
             ctx.arc(gate.p1.x, gate.p1.y, poleRadius, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = 'yellow';
+            ctx.fillStyle = hasPassed ? 'green' : 'yellow';
             ctx.beginPath();
             ctx.arc(gate.p2.x, gate.p2.y, poleRadius, 0, Math.PI * 2);
             ctx.fill();
