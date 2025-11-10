@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Super Canoe River Run</title>
+    <!-- Bootstrap for standard UI elements -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #333;
+            overflow: hidden; /* Prevent scrolling on play */
+            touch-action: none; /* Prevent default touch actions on mobile */
+            font-family: 'Arial', sans-serif;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #0a4466;
+        }
+
+        canvas {
+            background-color: #0077be;
+            box-shadow: 0px 0px 20px rgba(0,0,0,0.5);
+        }
+
+        /* UI Overlays */
+        .hud {
+            position: absolute;
+            pointer-events: none; /* Let clicks pass through to canvas/controls */
+            color: white;
+            text-shadow: 2px 2px 4px #000;
+            font-weight: bold;
+            z-index: 2;
+        }
+        #lapCounter { top: 10px; left: 20px; font-size: 24px; }
+        #gateCounter { top: 50px; left: 20px; font-size: 24px; }
+        #timer { top: 10px; right: 20px; font-size: 24px; font-family: monospace; }
+        #positionDisplay { top: 50px; right: 20px; font-size: 32px; color: yellow; }
+
+        /* Mobile Touch Zones */
+        .touch-zone {
+            position: absolute;
+            bottom: 0;
+            height: 100%;
+            width: 50%;
+            z-index: 1;
+            opacity: 0; /* Invisible but clickable */
+        }
+        #leftZone { left: 0; }
+        #rightZone { right: 0; }
+
+        /* Menus */
+        .game-menu {
+            position: absolute;
+            z-index: 10;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 90%;
+        }
+        #startScreen { display: block; }
+        #gameOverScreen { display: none; }
+
+        .key-hint {
+            display: inline-block;
+            background: #eee;
+            color: #333;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin: 0 5px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD -->
+    <div id="lapCounter" class="hud">LAP: 1 / 3</div>
+    <div id="timer" class="hud">00:00.00</div>
+    <div id="positionDisplay" class="hud">POS: 4th</div>
+
+    <!-- Touch Controls (Mobile) -->
+    <div id="leftZone" class="touch-zone"></div>
+    <div id="rightZone" class="touch-zone"></div>
+
+    <!-- Start Screen -->
+    <div id="startScreen" class="game-menu">
+        <h1 class="display-4 fw-bold text-warning mb-3">SUPER CANOE RIVER RUN</h1>
+        <p class="lead">Race 3 laps against the AI!</p>
+        <div class="my-4">
+            <h5>How to Race:</h5>
+            <p>Use rhythm! Alternate paddling left and right to build max speed.</p>
+            <p class="d-none d-md-block">
+                <span class="key-hint">← A</span> Paddle Left
+                <span class="key-hint">D →</span> Paddle Right
+            </p>
+            <p class="d-md-none">
+                Tap <strong>Left/Right</strong> side of screen to paddle.
+            </p>
+        </div>
+        <button class="btn btn-lg btn-success w-100 py-3 fw-bold" onclick="startGame()">START RACE</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="game-menu">
+        <h2 id="resultTitle" class="display-5 fw-bold mb-3">FINISHED!</h2>
+        <h3 id="finalPosition" class="text-warning mb-4">Placed: 1st</h3>
+        <div class="row mb-4 text-start">
+            <div class="col-6">Total Time:</div>
+            <div class="col-6 text-end" id="finalTime">00:00.00</div>
+            <div class="col-6">Best Lap:</div>
+            <div class="col-6 text-end" id="bestLap">--:--.--</div>
+        </div>
+        <button class="btn btn-lg btn-primary w-100 py-3 fw-bold" onclick="resetGame()">RACE AGAIN</button>
+    </div>
+</div>
+
+<!-- No external JS needed for game logic, keeping it self-contained -->
+<script>
+    // --- Setup & Configuration ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let GAME_STATE = 'menu'; // 'menu', 'racing', 'finished'
+
+    // Mobile detection for adjusting controls/view if needed
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    // Game Constants
+    const LAP_COUNT = 3;
+    const FPS = 60;
+    const DRAG = 0.97;      // Water resistance
+    const TURN_DRAG = 0.92; // Speed loss when turning hard
+    const PADDLE_POWER = 1.0; // Forward thrust per tap
+    const TURN_RATE = 0.20;   // How fast you turn per tap
+    const MAX_SPEED = 12;
+
+    let raceStartTime = 0;
+    let raceTime = 0;
+    let lastFrameTime = 0;
+
+    // The Track - Defined by a series of center points and a width
+    // Simple oval-ish track with some wiggles
+    const TRACK_WIDTH = 160;
+    const WAYPOINTS = [
+        {x: 200, y: 200}, {x: 500, y: 100}, {x: 900, y: 100}, {x: 1200, y: 200},
+        {x: 1300, y: 400}, {x: 1300, y: 700}, {x: 1100, y: 900}, {x: 800, y: 850},
+        {x: 500, y: 900}, {x: 200, y: 800}, {x: 100, y: 500}
+    ];
+
+    // --- Entities ---
+    class Canoe {
+        constructor(x, y, color, isAi = false) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.angle = 0; // Radians
+            this.vx = 0;
+            this.vy = 0;
+            this.speed = 0;
+            this.isAi = isAi;
+
+            // Race data
+            this.currentLap = 1;
+            this.nextWaypointIndex = 1; // Start aiming for second waypoint
+            this.lapTimes = [];
+            this.currentLapStart = 0;
+            this.finished = false;
+            this.place = 0;
+
+            // Paddle cooldowns to prevent just holding the button for max speed
+            this.paddleCooldownLeft = 0;
+            this.paddleCooldownRight = 0;
+
+            // AI specific
+            if (isAi) {
+                // Give AI slightly different stats so they don't stack perfectly
+                // Reduced skill to slow them down for ~20s+ laps
+                this.aiSkill = 0.80 + Math.random() * 0.05; // 0.80 to 0.85
+                this.targetOffset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.6); // Don't all aim for exact center
+            }
+        }
+
+        update() {
+            if (this.finished) {
+                // Finished racers should slow down gradually and do nothing else
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                this.x += this.vx;
+                this.y += this.vy;
+                return;
+            }
+            // --- Physics ---
+            // Apply velocity to position
+            this.x += this.vx;
+            this.y += this.vy;
+
+            // Calculate speed for drag application
+            this.speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+
+    // Apply water drag
+            this.vx *= DRAG;
+            this.vy *= DRAG;
+
+            // Cap speed
+            if (this.speed > MAX_SPEED) {
+                const ratio = MAX_SPEED / this.speed;
+                this.vx *= ratio;
+                this.vy *= ratio;
+            }
+
+            // Cooldowns
+            if (this.paddleCooldownLeft > 0) this.paddleCooldownLeft--;
+            if (this.paddleCooldownRight > 0) this.paddleCooldownRight--;
+
+            // --- AI Logic ---
+            if (this.isAi || this.finished) {
+                this.runAI();
+            }
+
+            // --- Track Collision & Lap Counting ---
+            this.checkTrackLimits();
+            this.checkWaypoints();
+            this.checkRapids();
+        }
+
+        paddle(side) {
+            if (GAME_STATE !== 'racing' && !this.finished) return;
+            if (this.finished) return;
+
+
+            // "Super Sprint" mechanic: Rhythm gives speed.
+            // Holding down gives turning but less speed efficiency eventually.
+
+            let thrust = PADDLE_POWER;
+            let turn = TURN_RATE;
+
+            if (this.isAi) {
+                 thrust *= this.aiSkill;
+            }
+
+            if (side === 'left') {
+                // Paddle on Left side -> Boat turns LEFT (standard arcade logic, not realistic physics)
+                // Actually, let's do: Paddle Left -> Turn Left. It's less confusing.
+                this.angle -= turn;
+                // Turning bleeds a little speed (classic top-down racer mechanic)
+                this.vx *= TURN_DRAG;
+                this.vy *= TURN_DRAG;
+            } else if (side === 'right') {
+                this.angle += turn;
+                this.vx *= TURN_DRAG;
+                this.vy *= TURN_DRAG;
+            }
+
+            // Add thrust in the new direction
+            this.vx += Math.cos(this.angle) * thrust;
+            this.vy += Math.sin(this.angle) * thrust;
+        }
+
+        runAI() {
+            if (this.finished) {
+                this.speed *= 0.95;
+            }
+            // AI now steers toward the next waypoint, not slalom gates.
+            let target = WAYPOINTS[this.nextWaypointIndex];
+
+            // Aim for waypoint + their personal offset (so they use full track width)
+            // We need the perpendicular vector to the track direction to apply offset correctly,
+            // but for a simple oval, just aiming at a generic offset works okayish.
+            let tx = target.x + Math.cos(this.angle + Math.PI/2) * this.targetOffset * 0.1; // Simplified offset
+            let ty = target.y + Math.sin(this.angle + Math.PI/2) * this.targetOffset * 0.1;
+
+            let dx = target.x - this.x; // Aim for true center to keep it simple for now
+            let dy = target.y - this.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            // Desired angle to target
+            let desiredAngle = Math.atan2(dy, dx);
+
+            // Difference between current heading and desired
+            let deltaAngle = desiredAngle - this.angle;
+            // Normalize angle to -PI to PI
+            while (deltaAngle <= -Math.PI) deltaAngle += Math.PI * 2;
+            while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
+
+            // --- Obstacle Avoidance ---
+            const AVOID_DISTANCE = 80;
+            for (let boulder of boulders) {
+                const dx_b = boulder.x - this.x;
+                const dy_b = boulder.y - this.y;
+                const dist_b = Math.sqrt(dx_b*dx_b + dy_b*dy_b);
+
+                if (dist_b < AVOID_DISTANCE) {
+                    const angleToBoulder = Math.atan2(dy_b, dx_b);
+                    let angleDiff = angleToBoulder - this.angle;
+                    while (angleDiff <= -Math.PI) angleDiff += Math.PI * 2;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+                    // If boulder is in front of the AI
+                    if (Math.abs(angleDiff) < Math.PI / 4) {
+                        // Steer away from it
+                        deltaAngle += angleDiff > 0 ? -0.5 : 0.5;
+                        break; // Only avoid one boulder at a time
+                    }
+                }
+            }
+
+
+            // AI Control inputs based on angle difference
+            if (Math.abs(deltaAngle) < 0.1) {
+                // Aiming correctly, paddle both sides for speed!
+                // Increased cooldown to slow down AI paddling rate.
+                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 15 + Math.random()*10; }
+                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 15 + Math.random()*10; }
+            } else if (deltaAngle < 0) {
+                // Need to turn left
+                this.paddle('left');
+            } else {
+                // Need to turn right
+                this.paddle('right');
+            }
+        }
+
+        checkWaypoints() {
+            // Check if close enough to current target waypoint to switch to next
+            let target = WAYPOINTS[this.nextWaypointIndex];
+            let dx = target.x - this.x;
+            let dy = target.y - this.y;
+            // AI needs smaller radius to ensure they don't cut too much, player can be looser
+            let hitDist = this.isAi ? 100 : 150;
+
+            if (dx*dx + dy*dy < hitDist * hitDist) {
+                // Waypoint reached
+                this.nextWaypointIndex = (this.nextWaypointIndex + 1) % WAYPOINTS.length;
+
+                // Lap completion check (Passing waypoint 0)
+                if (this.nextWaypointIndex === 1) { // Just passed 0, now aiming for 1
+                    this.completeLap();
+                }
+            }
+        }
+
+        completeLap() {
+            const now = Date.now();
+            const lapTime = now - this.currentLapStart;
+            this.lapTimes.push(lapTime);
+            this.currentLapStart = now;
+
+            if (this.currentLap >= LAP_COUNT) {
+                this.finished = true;
+                if (!this.isAi) {
+                    endGame();
+                } else {
+                    // Determine AI place if they finish before player
+                     let finishedCount = racers.filter(r => r.finished).length;
+                     this.place = finishedCount;
+                }
+            } else {
+                this.currentLap++;
+                if(!this.isAi) updateHUD();
+            }
+        }
+
+        checkRapids() {
+            const RAPID_FORCE = 0.5;
+            rapids.forEach(rapid => {
+                // Simple bounding box check for now
+                if (this.x > rapid.x - rapid.length / 2 && this.x < rapid.x + rapid.length / 2 &&
+                    this.y > rapid.y - rapid.width / 2 && this.y < rapid.y + rapid.width / 2) {
+
+                    this.vx += Math.cos(rapid.angle) * RAPID_FORCE;
+                    this.vy += Math.sin(rapid.angle) * RAPID_FORCE;
+                }
+            });
+        }
+
+        checkTrackLimits() {
+            // Very simple collision: find closest point on track center-line,
+            // if distance > width/2, push back.
+            // For this V1, we'll use a simpler radial check from waypoints if complex math is too slow,
+            // but let's try a segment implementation.
+
+            let closestDist = Infinity;
+            let closestPoint = {x: this.x, y: this.y};
+            let trackNormal = {x:0, y:0};
+
+            for (let i = 0; i < WAYPOINTS.length; i++) {
+                let p1 = WAYPOINTS[i];
+                let p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+
+                // Get point on line segment closest to canoe
+                let res = getClosestPointOnSegment(p1, p2, {x:this.x, y:this.y});
+                if (res.dist < closestDist) {
+                    closestDist = res.dist;
+                    closestPoint = res.point;
+                    // Calculate normal (vector pointing away from track center)
+                    let dx = this.x - res.point.x;
+                    let dy = this.y - res.point.y;
+                    let len = Math.sqrt(dx*dx + dy*dy);
+                    trackNormal = { x: dx/len || 0, y: dy/len || 0 }; // Avoid div by zero
+                }
+            }
+
+            // If outside track width
+            if (closestDist > TRACK_WIDTH / 2) {
+                // Push back towards track
+                let overlap = closestDist - (TRACK_WIDTH / 2);
+                this.x -= trackNormal.x * overlap * 1.1; // 1.1 gives a little bounce effect
+                this.y -= trackNormal.y * overlap * 1.1;
+                // Kill velocity heavily when hitting wall
+                this.vx *= 0.5;
+                this.vy *= 0.5;
+            }
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+
+            // Canoe Body
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            // Draw an elongated oval shape
+            ctx.moveTo(15, 0);
+            ctx.bezierCurveTo(15, 7, -15, 7, -15, 0);
+            ctx.bezierCurveTo(-15, -7, 15, -7, 15, 0);
+            ctx.fill();
+
+            // Outline for visibility
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Rower (just a dot for head)
+            ctx.fillStyle = '#f0d0b0'; // Skin tone
+            ctx.beginPath();
+            ctx.arc(-2, 0, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Paddle (visual only, animates when velocity is high)
+            if (this.speed > 1) {
+                 // Simple paddle flicker
+                 let paddleSide = Math.sin(Date.now() / 100) > 0 ? 1 : -1;
+                 ctx.strokeStyle = '#654321';
+                 ctx.lineWidth = 2;
+                 ctx.beginPath();
+                 ctx.moveTo(0, 5 * paddleSide);
+                 ctx.lineTo(-5, 12 * paddleSide);
+                 ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+    }
+
+    function generateRapids() {
+        rapids = [];
+        let trackLength = 0;
+        const segments = [];
+
+        // Calculate total track length and segment lengths
+        for (let i = 0; i < WAYPOINTS.length; i++) {
+            const p1 = WAYPOINTS[i];
+            const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+            const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            segments.push({ p1, p2, length });
+            trackLength += length;
+        }
+
+        for (let i = 0; i < RAPIDS_COUNT; i++) {
+            const distAlongTrack = Math.random() * trackLength;
+
+            let currentDist = 0;
+            let segmentIndex = 0;
+            while(currentDist + segments[segmentIndex].length < distAlongTrack) {
+                currentDist += segments[segmentIndex].length;
+                segmentIndex++;
+            }
+
+            const distIntoSegment = distAlongTrack - currentDist;
+            const segment = segments[segmentIndex];
+            const t = distIntoSegment / segment.length;
+
+            const rapidX = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
+            const rapidY = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
+
+            const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
+
+            rapids.push({ x: rapidX, y: rapidY, angle: angle, width: 60, length: 150 + Math.random() * 100 });
+        }
+    }
+
+    // --- Helper Math ---
+    function getClosestPointOnSegment(p1, p2, p) {
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let t = ((p.x - p1.x) * dx + (p.y - p1.y) * dy) / (dx * dx + dy * dy);
+        t = Math.max(0, Math.min(1, t)); // Clamp to segment
+        let closest = { x: p1.x + t * dx, y: p1.y + t * dy };
+        let dx2 = p.x - closest.x;
+        let dy2 = p.y - closest.y;
+        return { point: closest, dist: Math.sqrt(dx2*dx2 + dy2*dy2) };
+    }
+
+    // --- Game globals ---
+    let player;
+    let racers = [];
+    let camera = {x: 0, y: 0, zoom: 1};
+    let boulders = [];
+    const BOULDER_COUNT = 20;
+    let rapids = [];
+    const RAPIDS_COUNT = 5;
+
+    // --- Initialization ---
+    function initGame() {
+        // Resize canvas to fit screen
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Determine start positions (grid near waypoint 0)
+        const startX = WAYPOINTS[0].x;
+        const startY = WAYPOINTS[0].y;
+
+        racers = [
+            new Canoe(startX, startY - 20, '#ffdd00'), // Player (Yellow)
+            new Canoe(startX - 40, startY + 20, '#ff3333', true), // AI Red
+            new Canoe(startX - 80, startY - 20, '#33ff33', true), // AI Green
+            new Canoe(startX - 120, startY + 20, '#3333ff', true)  // AI Blue
+        ];
+        player = racers[0];
+
+        // Setup Camera initial position
+        camera.x = player.x - canvas.width / 2;
+        camera.y = player.y - canvas.height / 2;
+
+        generateBoulders();
+        generateRapids();
+        updateHUD();
+    }
+
+    function generateBoulders() {
+        boulders = [];
+        let trackLength = 0;
+        const segments = [];
+
+        // Calculate total track length and segment lengths
+        for (let i = 0; i < WAYPOINTS.length; i++) {
+            const p1 = WAYPOINTS[i];
+            const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+            const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            segments.push({ p1, p2, length });
+            trackLength += length;
+        }
+
+        for (let i = 0; i < BOULDER_COUNT; i++) {
+            const distAlongTrack = Math.random() * trackLength;
+
+            let currentDist = 0;
+            let segmentIndex = 0;
+            while(currentDist + segments[segmentIndex].length < distAlongTrack) {
+                currentDist += segments[segmentIndex].length;
+                segmentIndex++;
+            }
+
+            const distIntoSegment = distAlongTrack - currentDist;
+            const segment = segments[segmentIndex];
+            const t = distIntoSegment / segment.length;
+
+            const boulderX = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
+            const boulderY = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
+
+            const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
+            const perpAngle = angle + Math.PI / 2;
+
+            const offset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.8);
+
+            const finalX = boulderX + Math.cos(perpAngle) * offset;
+            const finalY = boulderY + Math.sin(perpAngle) * offset;
+            const radius = 15 + Math.random() * 10; // Boulders of varying sizes
+
+            boulders.push({ x: finalX, y: finalY, radius: radius });
+        }
+    }
+
+    function startGame() {
+        document.getElementById('startScreen').style.display = 'none';
+        document.getElementById('gameOverScreen').style.display = 'none';
+
+        initGame();
+
+        GAME_STATE = 'racing';
+        raceStartTime = Date.now();
+        racers.forEach(r => r.currentLapStart = raceStartTime);
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function resetGame() {
+        document.getElementById('gameOverScreen').style.display = 'none';
+        document.getElementById('startScreen').style.display = 'block';
+        GAME_STATE = 'menu';
+    }
+
+    function endGame() {
+        GAME_STATE = 'finished';
+
+        // Calculate final position
+        let finishOrder = racers.filter(r => r.finished).sort((a,b) => {
+             // Sort by who finished first (based on their last lap end time)
+             let aTime = a.lapTimes.reduce((sum, t) => sum + t, 0);
+             let bTime = b.lapTimes.reduce((sum, t) => sum + t, 0);
+             return aTime - bTime;
+        });
+
+        // If player hasn't finished but game ended (shouldn't happen with current logic but good for safety)
+        // Find player in the list
+        let playerPos = 1;
+        for(let i=0; i<racers.length; i++) {
+            if(racers[i].isAi && racers[i].finished) {
+                // If this AI finished before player, they are ahead
+                 let aiTotalTime = racers[i].lapTimes.reduce((a,b)=>a+b,0);
+                 let playerTotalTime = player.lapTimes.reduce((a,b)=>a+b,0);
+                 if (aiTotalTime < playerTotalTime) playerPos++;
+            }
+        }
+
+        // Format Place
+        let suffix = 'th';
+        if(playerPos===1) suffix='st';
+        else if(playerPos===2) suffix='nd';
+        else if(playerPos===3) suffix='rd';
+
+        document.getElementById('finalPosition').innerText = `Placed: ${playerPos}${suffix}`;
+
+        // Format Times
+        let totalTime = player.lapTimes.reduce((a, b) => a + b, 0);
+        let bestLap = Math.min(...player.lapTimes);
+
+        document.getElementById('finalTime').innerText = formatTime(totalTime);
+        document.getElementById('bestLap').innerText = formatTime(bestLap);
+        document.getElementById('gameOverScreen').style.display = 'block';
+    }
+
+    // --- Main Loop ---
+    function gameLoop() {
+        if (GAME_STATE === 'menu') return;
+
+        const now = Date.now();
+        // const dt = (now - lastFrameTime) / 1000; // Delta time if needed for smoother physics independent of FPS
+        lastFrameTime = now;
+
+        update();
+        draw();
+
+        if (GAME_STATE === 'racing' || GAME_STATE === 'finished') {
+            requestAnimationFrame(gameLoop);
+        }
+    }
+
+    function update() {
+        // Update all racers
+        racers.forEach(racer => racer.update());
+
+        // Check for collisions between canoes
+        checkCanoeCollisions();
+        checkBoulderCollisions();
+
+        // Update Camera to follow player smoothly
+        // Target camera position is centered on player
+        let targetCamX = player.x - canvas.width / 2;
+        let targetCamY = player.y - canvas.height / 2;
+
+        // Simple lerp for smooth camera
+        camera.x += (targetCamX - camera.x) * 0.1;
+        camera.y += (targetCamY - camera.y) * 0.1;
+
+        // Update HUD Timers and Position
+        if (GAME_STATE === 'racing') {
+            raceTime = Date.now() - raceStartTime;
+            document.getElementById('timer').innerText = formatTime(raceTime);
+            updateRacePosition();
+        }
+    }
+
+    function updateRacePosition() {
+        // Calculate position based on lap, next waypoint, and distance to it
+        // Higher score = better position
+        racers.forEach(r => {
+            let distToNext = Math.sqrt(Math.pow(r.x - WAYPOINTS[r.nextWaypointIndex].x, 2) + Math.pow(r.y - WAYPOINTS[r.nextWaypointIndex].y, 2));
+            // Score = Laps completed * 10000 + Waypoints Passed * 1000 - Distance to next Waypoint
+            r.raceScore = (r.currentLap * 10000) + (r.nextWaypointIndex * 1000) - distToNext;
+        });
+
+        racers.sort((a, b) => b.raceScore - a.raceScore);
+        let playerPos = racers.indexOf(player) + 1;
+
+        let suffix = 'th';
+        if(playerPos===1) suffix='st';
+        else if(playerPos===2) suffix='nd';
+        else if(playerPos===3) suffix='rd';
+        document.getElementById('positionDisplay').innerText = `POS: ${playerPos}${suffix}`;
+    }
+
+    function checkCanoeCollisions() {
+        const CANOE_RADIUS = 10; // Approximate radius for collision
+        for (let i = 0; i < racers.length; i++) {
+            for (let j = i + 1; j < racers.length; j++) {
+                const c1 = racers[i];
+                const c2 = racers[j];
+
+                const dx = c2.x - c1.x;
+                const dy = c2.y - c1.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < CANOE_RADIUS * 2) {
+                    // Collision detected
+                    const overlap = (CANOE_RADIUS * 2) - distance;
+                    const angle = Math.atan2(dy, dx);
+
+                    // Move them apart
+                    const moveX = (overlap / 2) * Math.cos(angle);
+                    const moveY = (overlap / 2) * Math.sin(angle);
+
+                    c1.x -= moveX;
+                    c1.y -= moveY;
+                    c2.x += moveX;
+                    c2.y += moveY;
+
+                    // Apply a small bounce
+                    const bounce = 0.1;
+                    c1.vx -= moveX * bounce;
+                    c1.vy -= moveY * bounce;
+                    c2.vx += moveX * bounce;
+                    c2.vy += moveY * bounce;
+                }
+            }
+        }
+    }
+
+    function checkBoulderCollisions() {
+        const CANOE_RADIUS = 10;
+        racers.forEach(canoe => {
+            boulders.forEach(boulder => {
+                const dx = boulder.x - canoe.x;
+                const dy = boulder.y - canoe.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const min_dist = boulder.radius + CANOE_RADIUS;
+
+                if (distance < min_dist) {
+                    // Collision
+                    const overlap = min_dist - distance;
+                    const angle = Math.atan2(dy, dx);
+
+                    // Push canoe away from boulder
+                    canoe.x -= Math.cos(angle) * overlap;
+                    canoe.y -= Math.sin(angle) * overlap;
+
+                    // Heavy speed reduction and bounce
+                    canoe.vx *= -0.3;
+                    canoe.vy *= -0.3;
+                }
+            });
+        });
+    }
+
+    function updateHUD() {
+         document.getElementById('lapCounter').innerText = `LAP: ${Math.min(player.currentLap, LAP_COUNT)} / ${LAP_COUNT}`;
+    }
+
+    function formatTime(ms) {
+        let minutes = Math.floor(ms / 60000);
+        let seconds = Math.floor((ms % 60000) / 1000);
+        let centiseconds = Math.floor((ms % 1000) / 10);
+        return (minutes < 10 ? "0" : "") + minutes + ":" +
+               (seconds < 10 ? "0" : "") + seconds + "." +
+               (centiseconds < 10 ? "0" : "") + centiseconds;
+    }
+
+    // --- Rendering ---
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        // Apply camera transform
+        ctx.translate(-camera.x, -camera.y);
+
+        // Draw World Background (Grass/Land)
+        // We just draw a huge rectangle around the track area just in case
+        ctx.fillStyle = '#2d5e1e'; // Dark green grass
+        ctx.fillRect(camera.x, camera.y, canvas.width, canvas.height); // Only draw visible area for performance? Actually just draw big enough.
+        ctx.fillRect(-1000, -1000, 4000, 4000);
+
+        // Draw Track (Water)
+        drawTrack();
+
+        // Draw Waypoints (Debug only, commented out for release)
+        /*
+        ctx.fillStyle = 'rgba(255,255,0,0.3)';
+        WAYPOINTS.forEach((wp, i) => {
+            ctx.beginPath(); ctx.arc(wp.x, wp.y, 10, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'white'; ctx.fillText(i, wp.x, wp.y);
+        });
+        */
+
+        // Draw Finish Line (At Waypoint 0)
+        drawFinishLine();
+
+        // Draw Rapids
+        drawRapids();
+
+        // Draw Boulders
+        drawBoulders();
+
+        // Draw Racers
+        racers.forEach(racer => racer.draw());
+
+        ctx.restore();
+    }
+
+    function drawTrack() {
+        // 1. Draw Track Border (Sand/Shore)
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
+        for (let i = 1; i < WAYPOINTS.length; i++) ctx.lineTo(WAYPOINTS[i].x, WAYPOINTS[i].y);
+        ctx.closePath();
+        ctx.lineWidth = TRACK_WIDTH + 20; // Slightly wider than water for shore
+        ctx.strokeStyle = '#c2b280'; // Sand color
+        ctx.stroke();
+
+        // 2. Draw Water
+        ctx.beginPath();
+        ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
+        for (let i = 1; i < WAYPOINTS.length; i++) ctx.lineTo(WAYPOINTS[i].x, WAYPOINTS[i].y);
+        ctx.closePath();
+        ctx.lineWidth = TRACK_WIDTH;
+        ctx.strokeStyle = '#0077be'; // Water color
+        ctx.stroke();
+
+        // 3. Draw Centerline (faint)
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 15]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    function drawFinishLine() {
+        ctx.save();
+        ctx.translate(WAYPOINTS[0].x, WAYPOINTS[0].y);
+        // Rotate to be perpendicular to track at start
+        // Approx angle between last and first waypoint
+        let dx = WAYPOINTS[1].x - WAYPOINTS[WAYPOINTS.length-1].x;
+        let dy = WAYPOINTS[1].y - WAYPOINTS[WAYPOINTS.length-1].y;
+        let angle = Math.atan2(dy, dx);
+        ctx.rotate(angle + Math.PI/2);
+
+        // Checkered pattern
+        let rows = 4;
+        let cols = 12;
+        let cellW = TRACK_WIDTH / cols;
+        let cellH = 10;
+        for(let r=0; r<rows; r++) {
+            for(let c=0; c<cols; c++) {
+                ctx.fillStyle = (r+c)%2 === 0 ? 'white' : 'black';
+                ctx.fillRect(-TRACK_WIDTH/2 + c*cellW, -cellH*rows/2 + r*cellH, cellW, cellH);
+            }
+        }
+        ctx.restore();
+    }
+
+    function drawRapids() {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        rapids.forEach(rapid => {
+            ctx.save();
+            ctx.translate(rapid.x, rapid.y);
+            ctx.rotate(rapid.angle);
+            ctx.fillRect(-rapid.length / 2, -rapid.width / 2, rapid.length, rapid.width);
+            ctx.restore();
+        });
+    }
+
+    function drawBoulders() {
+        ctx.fillStyle = '#4a4a4a'; // Dark grey for boulders
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = 2;
+        boulders.forEach(boulder => {
+            ctx.beginPath();
+            ctx.arc(boulder.x, boulder.y, boulder.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        });
+    }
+
+    // --- Input Handling ---
+    const keys = {};
+
+    window.addEventListener('keydown', (e) => {
+        keys[e.key] = true;
+        if (GAME_STATE !== 'racing') return;
+
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+            player.paddle('left');
+        }
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+            player.paddle('right');
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.key] = false;
+    });
+
+    // Touch controls
+    const leftZone = document.getElementById('leftZone');
+    const rightZone = document.getElementById('rightZone');
+
+    // Use 'touchstart' for immediate response on mobile
+    leftZone.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevents scrolling/zooming double tap issues
+        if (GAME_STATE === 'racing') player.paddle('left');
+    }, { passive: false });
+
+    rightZone.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (GAME_STATE === 'racing') player.paddle('right');
+    }, { passive: false });
+
+    // Also add click for desktop mouse testing if they click the invisible zones
+    leftZone.addEventListener('mousedown', (e) => { if(GAME_STATE==='racing') player.paddle('left'); });
+    rightZone.addEventListener('mousedown', (e) => { if(GAME_STATE==='racing') player.paddle('right'); });
+
+
+    // Handle Window Resize
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        if (player) {
+             // Re-center camera if mid-game resized
+             camera.x = player.x - canvas.width / 2;
+             camera.y = player.y - canvas.height / 2;
+        }
+    });
+
+    // Initial render to show background before start
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.fillStyle = '#0a4466';
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+</script>
+</body>
+</html>
