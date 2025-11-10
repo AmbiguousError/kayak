@@ -498,7 +498,26 @@
 
             const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
 
-            rapids.push({ x: rapidX, y: rapidY, angle: angle, width: 60, length: 150 + Math.random() * 100 });
+            const rapid = {
+                x: rapidX,
+                y: rapidY,
+                angle: angle,
+                width: 60,
+                length: 150 + Math.random() * 100,
+                particles: []
+            };
+
+            // Pre-generate particles for animation
+            const PARTICLE_COUNT = 30;
+            for(let j=0; j<PARTICLE_COUNT; j++) {
+                rapid.particles.push({
+                    x: (Math.random() - 0.5) * rapid.length,
+                    y: (Math.random() - 0.5) * rapid.width,
+                    speed: 2 + Math.random() * 2
+                });
+            }
+
+            rapids.push(rapid);
         }
     }
 
@@ -564,7 +583,10 @@
             trackLength += length;
         }
 
-        for (let i = 0; i < BOULDER_COUNT; i++) {
+        const SAFE_ZONE_RADIUS = 200;
+        const startPoint = WAYPOINTS[0];
+
+        while (boulders.length < BOULDER_COUNT) {
             const distAlongTrack = Math.random() * trackLength;
 
             let currentDist = 0;
@@ -588,9 +610,29 @@
 
             const finalX = boulderX + Math.cos(perpAngle) * offset;
             const finalY = boulderY + Math.sin(perpAngle) * offset;
+
+            // Check if the final boulder position is in the safe zone
+            const dx_start = finalX - startPoint.x;
+            const dy_start = finalY - startPoint.y;
+            if (Math.sqrt(dx_start*dx_start + dy_start*dy_start) < SAFE_ZONE_RADIUS) {
+                continue; // Too close to start, try again
+            }
+
             const radius = 15 + Math.random() * 10; // Boulders of varying sizes
 
-            boulders.push({ x: finalX, y: finalY, radius: radius });
+            // Create a more natural, irregular shape for the boulder
+            const shape = [];
+            const num_segments = 6 + Math.floor(Math.random() * 5); // Renamed to avoid shadowing
+            for (let j = 0; j < num_segments; j++) {
+                const angle = (j / num_segments) * Math.PI * 2;
+                const dist = radius * (0.8 + Math.random() * 0.4); // 80% to 120% of radius
+                shape.push({
+                    x: Math.cos(angle) * dist,
+                    y: Math.sin(angle) * dist
+                });
+            }
+
+            boulders.push({ x: finalX, y: finalY, radius: radius, shape: shape });
         }
     }
 
@@ -883,12 +925,34 @@
     }
 
     function drawRapids() {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
         rapids.forEach(rapid => {
             ctx.save();
             ctx.translate(rapid.x, rapid.y);
             ctx.rotate(rapid.angle);
+
+            // Draw the semi-transparent base of the rapids
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.fillRect(-rapid.length / 2, -rapid.width / 2, rapid.length, rapid.width);
+
+            // Draw and update animated particles (streaks)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            rapid.particles.forEach(p => {
+                // Move particle
+                p.x += p.speed;
+                // Wrap particle around if it goes off the edge
+                if (p.x > rapid.length / 2) {
+                    p.x = -rapid.length / 2;
+                    p.y = (Math.random() - 0.5) * rapid.width; // Respawn at a new vertical pos
+                }
+
+                // Draw streak
+                ctx.moveTo(p.x - 10, p.y);
+                ctx.lineTo(p.x, p.y);
+            });
+            ctx.stroke();
+
             ctx.restore();
         });
     }
@@ -898,10 +962,17 @@
         ctx.strokeStyle = '#2a2a2a';
         ctx.lineWidth = 2;
         boulders.forEach(boulder => {
+            ctx.save();
+            ctx.translate(boulder.x, boulder.y);
             ctx.beginPath();
-            ctx.arc(boulder.x, boulder.y, boulder.radius, 0, Math.PI * 2);
+            ctx.moveTo(boulder.shape[0].x, boulder.shape[0].y);
+            for (let i = 1; i < boulder.shape.length; i++) {
+                ctx.lineTo(boulder.shape[i].x, boulder.shape[i].y);
+            }
+            ctx.closePath();
             ctx.fill();
             ctx.stroke();
+            ctx.restore();
         });
     }
 
