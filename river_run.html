@@ -955,9 +955,10 @@
                     canoe.x -= Math.cos(angle) * overlap;
                     canoe.y -= Math.sin(angle) * overlap;
 
-                    // Heavy speed reduction and bounce
-                    canoe.vx *= -0.3;
-                    canoe.vy *= -0.3;
+                    // Apply a recoil force away from the boulder
+                    const recoil_force = 4; // Adjust for desired bounce strength
+                    canoe.vx = -Math.cos(angle) * recoil_force;
+                    canoe.vy = -Math.sin(angle) * recoil_force;
                 }
             });
         });
