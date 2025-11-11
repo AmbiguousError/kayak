@@ -645,7 +645,12 @@
             const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
             const perpAngle = angle + Math.PI / 2;
 
-            const offset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.8);
+            const radius = 15 + Math.random() * 10; // Boulders of varying sizes
+
+            // New logic: Account for boulder radius and canoe clearance
+            const CANOE_CLEARANCE = 25; // A bit more than canoe width for easier passage
+            const max_offset = (TRACK_WIDTH / 2) - radius - CANOE_CLEARANCE;
+            const offset = (Math.random() * 2 - 1) * max_offset; // Random offset from -max_offset to +max_offset
 
             const finalX = boulderX + Math.cos(perpAngle) * offset;
             const finalY = boulderY + Math.sin(perpAngle) * offset;
@@ -668,9 +673,6 @@
                 }
             }
             if (tooClose) continue;
-
-
-            const radius = 15 + Math.random() * 10; // Boulders of varying sizes
 
             // Create a more natural, irregular shape for the boulder
             const shape = [];
@@ -710,25 +712,11 @@
     function endGame() {
         GAME_STATE = 'finished';
 
-        // Calculate final position
-        let finishOrder = racers.filter(r => r.finished).sort((a,b) => {
-             // Sort by who finished first (based on their last lap end time)
-             let aTime = a.lapTimes.reduce((sum, t) => sum + t, 0);
-             let bTime = b.lapTimes.reduce((sum, t) => sum + t, 0);
-             return aTime - bTime;
-        });
+        // Re-run the position calculation one last time to get the definitive final order
+        updateRacePosition();
 
-        // If player hasn't finished but game ended (shouldn't happen with current logic but good for safety)
-        // Find player in the list
-        let playerPos = 1;
-        for(let i=0; i<racers.length; i++) {
-            if(racers[i].isAi && racers[i].finished) {
-                // If this AI finished before player, they are ahead
-                 let aiTotalTime = racers[i].lapTimes.reduce((a,b)=>a+b,0);
-                 let playerTotalTime = player.lapTimes.reduce((a,b)=>a+b,0);
-                 if (aiTotalTime < playerTotalTime) playerPos++;
-            }
-        }
+        // The racers array is now sorted by final position
+        let playerPos = racers.indexOf(player) + 1;
 
         // Format Place
         let suffix = 'th';
@@ -793,8 +781,14 @@
         // Higher score = better position
         racers.forEach(r => {
             let distToNext = Math.sqrt(Math.pow(r.x - WAYPOINTS[r.nextWaypointIndex].x, 2) + Math.pow(r.y - WAYPOINTS[r.nextWaypointIndex].y, 2));
-            // Score = Laps completed * 10000 + Waypoints Passed * 1000 - Distance to next Waypoint
-            r.raceScore = (r.currentLap * 10000) + (r.nextWaypointIndex * 1000) - distToNext;
+
+            // Fix for position dropping when crossing finish line:
+            // If the next waypoint is 0, it means we've completed a full circuit of waypoints for this lap.
+            // For scoring, treat this as the highest waypoint index value.
+            let scoringWaypointIndex = r.nextWaypointIndex === 0 ? WAYPOINTS.length : r.nextWaypointIndex;
+
+            // Score = Laps completed * (large number) + Waypoints Passed * (medium number) - Distance to next Waypoint
+            r.raceScore = (r.currentLap * 100000) + (scoringWaypointIndex * 1000) - distToNext;
         });
 
         racers.sort((a, b) => b.raceScore - a.raceScore);
