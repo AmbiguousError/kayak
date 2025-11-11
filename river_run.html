@@ -163,9 +163,44 @@
 
     let trackLength = 0;
     const trackSegments = [];
-    for (let i = 0; i < WAYPOINTS.length; i++) {
-        const p1 = WAYPOINTS[i];
-        const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+
+    let CURVED_WAYPOINTS = []; // This will hold the high-resolution track points
+    const CURVE_RESOLUTION = 15; // Number of points per waypoint segment
+
+    // Function to implement Catmull-Rom spline interpolation for a point
+    function catmullRomPoint(p0, p1, p2, p3, t) {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+        const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+        return {x, y};
+    }
+
+    // Generates a high-resolution curved path from the base waypoints
+    function generateCurvedTrack(points, resolution) {
+        const curvedPoints = [];
+        const numPoints = points.length;
+
+        for (let i = 0; i < numPoints; i++) {
+            const p0 = points[(i - 1 + numPoints) % numPoints];
+            const p1 = points[i];
+            const p2 = points[(i + 1) % numPoints];
+            const p3 = points[(i + 2) % numPoints];
+
+            for (let j = 0; j < resolution; j++) {
+                const t = j / resolution;
+                curvedPoints.push(catmullRomPoint(p0, p1, p2, p3, t));
+            }
+        }
+        return curvedPoints;
+    }
+
+    CURVED_WAYPOINTS = generateCurvedTrack(WAYPOINTS, CURVE_RESOLUTION);
+
+    // Now that CURVED_WAYPOINTS is populated, calculate the track segments and total length
+    for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
+        const p1 = CURVED_WAYPOINTS[i];
+        const p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
         const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
         trackSegments.push({ p1, p2, length });
         trackLength += length;
@@ -427,9 +462,9 @@
             let closestPoint = {x: this.x, y: this.y};
             let trackNormal = {x:0, y:0};
 
-            for (let i = 0; i < WAYPOINTS.length; i++) {
-                let p1 = WAYPOINTS[i];
-                let p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
+            for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
+                let p1 = CURVED_WAYPOINTS[i];
+                let p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
 
                 // Get point on line segment closest to canoe
                 let res = getClosestPointOnSegment(p1, p2, {x:this.x, y:this.y});
@@ -778,20 +813,25 @@
     }
 
     function updateRacePosition() {
-        // Calculate position based on lap, next waypoint, and distance to it
-        // Higher score = better position
+        // This function calculates each racer's position. It works by assigning a 'raceScore'.
+        // A higher score means a better position. The score is calculated as follows:
+        // 1. Lap number is the most important factor (multiplied by a large number).
+        // 2. The index of the next *original* waypoint is the second factor. We use the original
+        //    waypoints here as they provide stable, well-spaced checkpoints for progress.
+        // 3. The distance *to* the next waypoint is subtracted, so being closer gives a higher score.
+
         racers.forEach(r => {
             let distToNext = Math.sqrt(Math.pow(r.x - WAYPOINTS[r.nextWaypointIndex].x, 2) + Math.pow(r.y - WAYPOINTS[r.nextWaypointIndex].y, 2));
 
-            // Fix for position dropping when crossing finish line:
-            // If the next waypoint is 0, it means we've completed a full circuit of waypoints for this lap.
-            // For scoring, treat this as the highest waypoint index value.
+            // This addresses an edge case: when a racer completes a lap, their next waypoint index
+            // resets to 0. To prevent their score from incorrectly dropping, we treat waypoint 0
+            // as having the highest index for scoring purposes.
             let scoringWaypointIndex = r.nextWaypointIndex === 0 ? WAYPOINTS.length : r.nextWaypointIndex;
 
-            // Score = Laps completed * (large number) + Waypoints Passed * (medium number) - Distance to next Waypoint
             r.raceScore = (r.currentLap * 100000) + (scoringWaypointIndex * 1000) - distToNext;
         });
 
+        // Sort the racers array in place from highest score to lowest
         racers.sort((a, b) => b.raceScore - a.raceScore);
         let playerPos = racers.indexOf(player) + 1;
 
@@ -923,8 +963,8 @@
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
-        for (let i = 1; i < WAYPOINTS.length; i++) ctx.lineTo(WAYPOINTS[i].x, WAYPOINTS[i].y);
+        ctx.moveTo(CURVED_WAYPOINTS[0].x, CURVED_WAYPOINTS[0].y);
+        for (let i = 1; i < CURVED_WAYPOINTS.length; i++) ctx.lineTo(CURVED_WAYPOINTS[i].x, CURVED_WAYPOINTS[i].y);
         ctx.closePath();
         ctx.lineWidth = TRACK_WIDTH + 20; // Slightly wider than water for shore
         ctx.strokeStyle = '#c2b280'; // Sand color
@@ -948,8 +988,8 @@
         const waterColors = ['#005f9a', '#006aae', '#0077be'];
         for(let i = waterColors.length - 1; i >= 0; i--) {
             ctx.beginPath();
-            ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
-            for (let j = 1; j < WAYPOINTS.length; j++) ctx.lineTo(WAYPOINTS[j].x, WAYPOINTS[j].y);
+            ctx.moveTo(CURVED_WAYPOINTS[0].x, CURVED_WAYPOINTS[0].y);
+            for (let j = 1; j < CURVED_WAYPOINTS.length; j++) ctx.lineTo(CURVED_WAYPOINTS[j].x, CURVED_WAYPOINTS[j].y);
             ctx.closePath();
             ctx.lineWidth = TRACK_WIDTH - i * 20;
             ctx.strokeStyle = waterColors[i];
