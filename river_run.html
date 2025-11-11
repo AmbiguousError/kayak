@@ -142,9 +142,9 @@
     // Game Constants
     const LAP_COUNT = 3;
     const FPS = 60;
-    const DRAG = 0.97;      // Water resistance
+    const DRAG = 0.96;      // Water resistance
     const TURN_DRAG = 0.92; // Speed loss when turning hard
-    const PADDLE_POWER = 1.0; // Forward thrust per tap
+    const PADDLE_POWER = 0.9; // Forward thrust per tap
     const TURN_RATE = 0.20;   // How fast you turn per tap
     const MAX_SPEED = 12;
 
@@ -218,7 +218,7 @@
             if (isAi) {
                 // Give AI slightly different stats so they don't stack perfectly
                 // Reduced skill to slow them down for ~25s+ laps
-                this.aiSkill = 0.70 + Math.random() * 0.05; // 0.70 to 0.75
+                this.aiSkill = 0.68 + Math.random() * 0.05; // 0.68 to 0.73
                 this.targetOffset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.6); // Don't all aim for exact center
             }
         }
@@ -352,8 +352,8 @@
             if (Math.abs(deltaAngle) < 0.1) {
                 // Aiming correctly, paddle both sides for speed!
                 // Increased cooldown to slow down AI paddling rate.
-                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 20 + Math.random()*10; }
-                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 20 + Math.random()*10; }
+                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 25 + Math.random()*10; }
+                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 25 + Math.random()*10; }
             } else if (deltaAngle < 0) {
                 // Need to turn left
                 this.paddle('left');
@@ -535,19 +535,22 @@
                 angle: angle,
                 width: 60,
                 length: 150 + Math.random() * 100,
-                particles: []
+                particles: [],
+                waypointIndex: segmentIndex
             };
 
             // Pre-generate particles for animation
-            const PARTICLE_COUNT = 25;
+            const PARTICLE_COUNT = 70; // Increased particle count
             for(let j=0; j<PARTICLE_COUNT; j++) {
-                const maxLife = 50 + Math.random() * 50;
+                const maxLife = 40 + Math.random() * 60; // More variation
                 rapid.particles.push({
                     x: (Math.random() - 0.5) * rapid.length,
                     y: (Math.random() - 0.5) * rapid.width,
+                    vx: (Math.random() - 0.2) * 0.5, // move with the current
+                    vy: (Math.random() - 0.5) * 0.2,
                     life: Math.random() * maxLife,
                     maxLife: maxLife,
-                    radius: Math.random() * 3 + 1,
+                    radius: Math.random() * 4 + 2, // More variation in size
                     opacity: 0
                 });
             }
@@ -946,14 +949,17 @@
         }
 
 
-        // 2. Draw Water
-        ctx.beginPath();
-        ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
-        for (let i = 1; i < WAYPOINTS.length; i++) ctx.lineTo(WAYPOINTS[i].x, WAYPOINTS[i].y);
-        ctx.closePath();
-        ctx.lineWidth = TRACK_WIDTH;
-        ctx.strokeStyle = '#0077be'; // Water color
-        ctx.stroke();
+        // 2. Draw Water with layers for depth
+        const waterColors = ['#005f9a', '#006aae', '#0077be'];
+        for(let i = waterColors.length - 1; i >= 0; i--) {
+            ctx.beginPath();
+            ctx.moveTo(WAYPOINTS[0].x, WAYPOINTS[0].y);
+            for (let j = 1; j < WAYPOINTS.length; j++) ctx.lineTo(WAYPOINTS[j].x, WAYPOINTS[j].y);
+            ctx.closePath();
+            ctx.lineWidth = TRACK_WIDTH - i * 20;
+            ctx.strokeStyle = waterColors[i];
+            ctx.stroke();
+        }
 
 
 
@@ -995,23 +1001,21 @@
             ctx.translate(rapid.x, rapid.y);
             ctx.rotate(rapid.angle);
 
-            // Draw the semi-transparent base of the rapids
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.fillRect(-rapid.length / 2, -rapid.width / 2, rapid.length, rapid.width);
-
             // Draw and update animated ripple particles
             rapid.particles.forEach(p => {
                 p.life++;
+                p.x += p.vx;
+                p.y += p.vy;
+
                 if (p.life > p.maxLife) {
                     p.x = (Math.random() - 0.5) * rapid.length;
                     p.y = (Math.random() - 0.5) * rapid.width;
                     p.life = 0;
-                    p.radius = Math.random() * 3 + 1;
                 }
 
                 // Fade in and out
                 const life_percent = p.life / p.maxLife;
-                p.opacity = Math.sin(life_percent * Math.PI) * 0.5;
+                p.opacity = Math.sin(life_percent * Math.PI) * (0.3 + Math.random() * 0.3); // More variance
 
                 ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
                 ctx.beginPath();
