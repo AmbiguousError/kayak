@@ -326,7 +326,8 @@
             while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
 
             // --- Obstacle Avoidance ---
-            const AVOID_DISTANCE = 80;
+            const AVOID_DISTANCE = 120; // Increased detection distance
+            const AVOID_STRENGTH = 1.0;  // Increased steering force
             for (let boulder of boulders) {
                 const dx_b = boulder.x - this.x;
                 const dy_b = boulder.y - this.y;
@@ -339,9 +340,9 @@
                     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
                     // If boulder is in front of the AI
-                    if (Math.abs(angleDiff) < Math.PI / 4) {
-                        // Steer away from it
-                        deltaAngle += angleDiff > 0 ? -0.5 : 0.5;
+                    if (Math.abs(angleDiff) < Math.PI / 3) { // Wider cone of detection
+                        // Steer away from it more decisively
+                        deltaAngle += (angleDiff > 0 ? -AVOID_STRENGTH : AVOID_STRENGTH) * (1 - dist_b / AVOID_DISTANCE);
                         break; // Only avoid one boulder at a time
                     }
                 }
@@ -957,12 +958,7 @@
 
 
 
-        // 3. Draw Centerline (faint)
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([10, 15]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        // 3. Centerline removed as requested
     }
 
     function drawFinishLine() {
