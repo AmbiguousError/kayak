@@ -255,6 +255,7 @@
                 // Reduced skill to slow them down for ~25s+ laps
                 this.aiSkill = 0.68 + Math.random() * 0.05; // 0.68 to 0.73
                 this.targetOffset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.6); // Don't all aim for exact center
+                this.stuckTimer = 0; // Timer to track if AI is stuck
             }
         }
 
@@ -351,6 +352,14 @@
             let dy = target.y - this.y;
             let dist = Math.sqrt(dx*dx + dy*dy);
 
+            // --- Stuck Detection ---
+            // If AI is barely moving, increment stuck timer. Otherwise, reset it.
+            if (this.speed < 0.5) {
+                this.stuckTimer++;
+            } else {
+                this.stuckTimer = 0;
+            }
+
             // Desired angle to target
             let desiredAngle = Math.atan2(dy, dx);
 
@@ -360,27 +369,49 @@
             while (deltaAngle <= -Math.PI) deltaAngle += Math.PI * 2;
             while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
 
-            // --- Obstacle Avoidance ---
-            const AVOID_DISTANCE = 120; // Increased detection distance
-            const AVOID_STRENGTH = 1.0;  // Increased steering force
-            for (let boulder of boulders) {
-                const dx_b = boulder.x - this.x;
-                const dy_b = boulder.y - this.y;
-                const dist_b = Math.sqrt(dx_b*dx_b + dy_b*dy_b);
-
-                if (dist_b < AVOID_DISTANCE) {
-                    const angleToBoulder = Math.atan2(dy_b, dx_b);
-                    let angleDiff = angleToBoulder - this.angle;
-                    while (angleDiff <= -Math.PI) angleDiff += Math.PI * 2;
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-
-                    // If boulder is in front of the AI
-                    if (Math.abs(angleDiff) < Math.PI / 3) { // Wider cone of detection
-                        // Steer away from it more decisively
-                        deltaAngle += (angleDiff > 0 ? -AVOID_STRENGTH : AVOID_STRENGTH) * (1 - dist_b / AVOID_DISTANCE);
-                        break; // Only avoid one boulder at a time
+            // --- "Unstuck" Logic ---
+            if (this.stuckTimer > 30) { // If stuck for 0.5 seconds
+                let closestBoulder = null;
+                let minBoulderDist = Infinity;
+                for (let boulder of boulders) {
+                    const dx_b = boulder.x - this.x;
+                    const dy_b = boulder.y - this.y;
+                    const dist_b = Math.sqrt(dx_b*dx_b + dy_b*dy_b);
+                    if (dist_b < minBoulderDist) {
+                        minBoulderDist = dist_b;
+                        closestBoulder = boulder;
                     }
                 }
+
+                if (closestBoulder) {
+                    // Steer directly away from the closest boulder
+                    const angleToBoulder = Math.atan2(closestBoulder.y - this.y, closestBoulder.x - this.x);
+                    desiredAngle = angleToBoulder + Math.PI; // Opposite direction
+                    deltaAngle = desiredAngle - this.angle;
+                     while (deltaAngle <= -Math.PI) deltaAngle += Math.PI * 2;
+                     while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
+                }
+            } else {
+                 // --- Standard Obstacle Avoidance ---
+                 const AVOID_DISTANCE = 120;
+                 const AVOID_STRENGTH = 1.0;
+                 for (let boulder of boulders) {
+                     const dx_b = boulder.x - this.x;
+                     const dy_b = boulder.y - this.y;
+                     const dist_b = Math.sqrt(dx_b*dx_b + dy_b*dy_b);
+
+                     if (dist_b < AVOID_DISTANCE) {
+                         const angleToBoulder = Math.atan2(dy_b, dx_b);
+                         let angleDiff = angleToBoulder - this.angle;
+                         while (angleDiff <= -Math.PI) angleDiff += Math.PI * 2;
+                         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+                         if (Math.abs(angleDiff) < Math.PI / 3) {
+                             deltaAngle += (angleDiff > 0 ? -AVOID_STRENGTH : AVOID_STRENGTH) * (1 - dist_b / AVOID_DISTANCE);
+                             break;
+                         }
+                     }
+                 }
             }
 
 
