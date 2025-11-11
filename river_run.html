@@ -152,13 +152,19 @@
     let raceTime = 0;
     let lastFrameTime = 0;
 
-    // The Track - Defined by a series of center points and a width
-    // Simple oval-ish track with some wiggles
-    const TRACK_WIDTH = 160;
+    // The Track - Defined by a series of center points, each with a specific width.
+    // This creates a more dynamic river with varying widths and more complex bends.
     const WAYPOINTS = [
-        {x: 200, y: 200}, {x: 500, y: 100}, {x: 900, y: 100}, {x: 1200, y: 200},
-        {x: 1300, y: 400}, {x: 1300, y: 700}, {x: 1100, y: 900}, {x: 800, y: 850},
-        {x: 500, y: 900}, {x: 200, y: 800}, {x: 100, y: 500}
+        {x: 200, y: 200, width: 200},
+        {x: 600, y: 100, width: 150},
+        {x: 1000, y: 150, width: 150},
+        {x: 1300, y: 300, width: 200},
+        {x: 1400, y: 600, width: 250}, // A wider section
+        {x: 1200, y: 900, width: 180},
+        {x: 800, y: 1000, width: 150}, // A narrow chicane
+        {x: 600, y: 850, width: 150},
+        {x: 300, y: 900, width: 200},
+        {x: 100, y: 600, width: 220}
     ];
 
     let trackLength = 0;
@@ -173,7 +179,8 @@
         const t3 = t2 * t;
         const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
         const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
-        return {x, y};
+        const width = 0.5 * ((2 * p1.width) + (-p0.width + p2.width) * t + (2 * p0.width - 5 * p1.width + 4 * p2.width - p3.width) * t2 + (-p0.width + 3 * p1.width - 3 * p2.width + p3.width) * t3);
+        return {x, y, width};
     }
 
     // Generates a high-resolution curved path from the base waypoints
@@ -209,20 +216,29 @@
     function getPointAlongTrack(distance) {
         let currentDist = 0;
         let segmentIndex = 0;
+        // Handle wrapping around the track
+        distance = distance % trackLength;
+        if (distance < 0) distance += trackLength;
+
         while(currentDist + trackSegments[segmentIndex].length < distance) {
             currentDist += trackSegments[segmentIndex].length;
             segmentIndex++;
+             if (segmentIndex >= trackSegments.length) { // Should not happen with modulo, but for safety
+                segmentIndex = 0;
+                currentDist = 0;
+            }
         }
 
         const distIntoSegment = distance - currentDist;
         const segment = trackSegments[segmentIndex];
-        const t = distIntoSegment / segment.length;
+        const t = segment.length > 0 ? distIntoSegment / segment.length : 0;
 
         const x = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
         const y = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
+        const width = segment.p1.width + (segment.p2.width - segment.p1.width) * t;
         const angle = Math.atan2(segment.p2.y - segment.p1.y, segment.p2.x - segment.p1.x);
 
-        return { x, y, angle };
+        return { x, y, angle, width };
     }
 
     // --- Entities ---
@@ -244,6 +260,8 @@
             this.currentLapStart = 0;
             this.finished = false;
             this.place = 0;
+            this.finishTime = 0; // Time they crossed the finish line
+            this.raceScore = 0;  // Live score for ranking while racing
 
             // Paddle cooldowns to prevent just holding the button for max speed
             this.paddleCooldownLeft = 0;
@@ -252,9 +270,12 @@
             // AI specific
             if (isAi) {
                 // Give AI slightly different stats so they don't stack perfectly
-                // Reduced skill to slow them down for ~25s+ laps
-                this.aiSkill = 0.68 + Math.random() * 0.05; // 0.68 to 0.73
-                this.targetOffset = (Math.random() - 0.5) * (TRACK_WIDTH * 0.6); // Don't all aim for exact center
+                // Skill now targets laps around 22-24s
+                this.aiSkill = 0.75 + Math.random() * 0.05; // 0.75 to 0.80
+                // Have the AI target a point within the track, not just the center line
+                // Use the starting line width as a basis for their random offset
+                const startWidth = WAYPOINTS[0].width;
+                this.targetOffset = (Math.random() - 0.5) * (startWidth * 0.6);
                 this.stuckTimer = 0; // Timer to track if AI is stuck
             }
         }
@@ -418,9 +439,9 @@
             // AI Control inputs based on angle difference
             if (Math.abs(deltaAngle) < 0.1) {
                 // Aiming correctly, paddle both sides for speed!
-                // Increased cooldown to slow down AI paddling rate.
-                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 25 + Math.random()*10; }
-                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 25 + Math.random()*10; }
+                // Reduced cooldown for more competitive paddling rate.
+                if (this.paddleCooldownLeft <= 0) { this.paddle('left'); this.paddleCooldownLeft = 18 + Math.random()*8; }
+                if (this.paddleCooldownRight <= 0) { this.paddle('right'); this.paddleCooldownRight = 18 + Math.random()*8; }
             } else if (deltaAngle < 0) {
                 // Need to turn left
                 this.paddle('left');
@@ -457,12 +478,11 @@
 
             if (this.currentLap >= LAP_COUNT) {
                 this.finished = true;
-                if (!this.isAi) {
+                this.finishTime = Date.now() - raceStartTime; // Record finish time
+                // Check if all racers have finished to end the game for everyone
+                const allFinished = racers.every(r => r.finished);
+                if (!this.isAi || allFinished) {
                     endGame();
-                } else {
-                    // Determine AI place if they finish before player
-                     let finishedCount = racers.filter(r => r.finished).length;
-                     this.place = finishedCount;
                 }
             } else {
                 this.currentLap++;
@@ -484,24 +504,20 @@
         }
 
         checkTrackLimits() {
-            // Very simple collision: find closest point on track center-line,
-            // if distance > width/2, push back.
-            // For this V1, we'll use a simpler radial check from waypoints if complex math is too slow,
-            // but let's try a segment implementation.
-
             let closestDist = Infinity;
             let closestPoint = {x: this.x, y: this.y};
             let trackNormal = {x:0, y:0};
+            let closestWidth = 200; // Default width
 
             for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
                 let p1 = CURVED_WAYPOINTS[i];
                 let p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
 
-                // Get point on line segment closest to canoe
                 let res = getClosestPointOnSegment(p1, p2, {x:this.x, y:this.y});
                 if (res.dist < closestDist) {
                     closestDist = res.dist;
                     closestPoint = res.point;
+                    closestWidth = res.width; // Capture the width at the closest point
                     // Calculate normal (vector pointing away from track center)
                     let dx = this.x - res.point.x;
                     let dy = this.y - res.point.y;
@@ -511,9 +527,9 @@
             }
 
             // If outside track width
-            if (closestDist > TRACK_WIDTH / 2) {
+            if (closestDist > closestWidth / 2) {
                 // Push back towards track
-                let overlap = closestDist - (TRACK_WIDTH / 2);
+                let overlap = closestDist - (closestWidth / 2);
                 this.x -= trackNormal.x * overlap * 1.1; // 1.1 gives a little bounce effect
                 this.y -= trackNormal.y * overlap * 1.1;
                 // Kill velocity heavily when hitting wall
@@ -630,12 +646,17 @@
     function getClosestPointOnSegment(p1, p2, p) {
         let dx = p2.x - p1.x;
         let dy = p2.y - p1.y;
+        if (dx === 0 && dy === 0) { // Points are identical
+            const dist = Math.sqrt(Math.pow(p.x - p1.x, 2) + Math.pow(p.y - p1.y, 2));
+            return { point: {x: p1.x, y: p1.y}, dist: dist, width: p1.width };
+        }
         let t = ((p.x - p1.x) * dx + (p.y - p1.y) * dy) / (dx * dx + dy * dy);
         t = Math.max(0, Math.min(1, t)); // Clamp to segment
         let closest = { x: p1.x + t * dx, y: p1.y + t * dy };
+        const width = p1.width + (p2.width - p1.width) * t;
         let dx2 = p.x - closest.x;
         let dy2 = p.y - closest.y;
-        return { point: closest, dist: Math.sqrt(dx2*dx2 + dy2*dy2) };
+        return { point: closest, dist: Math.sqrt(dx2*dx2 + dy2*dy2), width: width };
     }
 
     // --- Game globals ---
@@ -679,7 +700,8 @@
         let trackLength = 0;
         const segments = [];
 
-        // Calculate total track length and segment lengths
+        // Calculate total track length and segment lengths from the original WAYPOINTS
+        // This is simpler and faster for object placement than using the high-res curve
         for (let i = 0; i < WAYPOINTS.length; i++) {
             const p1 = WAYPOINTS[i];
             const p2 = WAYPOINTS[(i + 1) % WAYPOINTS.length];
@@ -706,6 +728,9 @@
             const segment = segments[segmentIndex];
             const t = distIntoSegment / segment.length;
 
+            // Interpolate width for this specific point on the track
+            const segmentWidth = segment.p1.width + (segment.p2.width - segment.p1.width) * t;
+
             const boulderX = segment.p1.x + (segment.p2.x - segment.p1.x) * t;
             const boulderY = segment.p1.y + (segment.p2.y - segment.p1.y) * t;
 
@@ -715,8 +740,8 @@
             const radius = 15 + Math.random() * 10; // Boulders of varying sizes
 
             // New logic: Account for boulder radius and canoe clearance
-            const CANOE_CLEARANCE = 25; // A bit more than canoe width for easier passage
-            const max_offset = (TRACK_WIDTH / 2) - radius - CANOE_CLEARANCE;
+            const CANOE_CLEARANCE = 40; // Increased clearance from bank for better playability
+            const max_offset = (segmentWidth / 2) - radius - CANOE_CLEARANCE;
             const offset = (Math.random() * 2 - 1) * max_offset; // Random offset from -max_offset to +max_offset
 
             const finalX = boulderX + Math.cos(perpAngle) * offset;
@@ -777,25 +802,25 @@
     }
 
     function endGame() {
+        if (GAME_STATE === 'finished') return; // Prevent multiple calls
         GAME_STATE = 'finished';
 
-        // Re-run the position calculation one last time to get the definitive final order
+        // Finalize positions
         updateRacePosition();
 
-        // The racers array is now sorted by final position
-        let playerPos = racers.indexOf(player) + 1;
+        let playerFinalPos = racers.indexOf(player) + 1;
 
         // Format Place
         let suffix = 'th';
-        if(playerPos===1) suffix='st';
-        else if(playerPos===2) suffix='nd';
-        else if(playerPos===3) suffix='rd';
+        if(playerFinalPos===1) suffix='st';
+        else if(playerFinalPos===2) suffix='nd';
+        else if(playerFinalPos===3) suffix='rd';
 
-        document.getElementById('finalPosition').innerText = `Placed: ${playerPos}${suffix}`;
+        document.getElementById('finalPosition').innerText = `Placed: ${playerFinalPos}${suffix}`;
 
-        // Format Times
-        let totalTime = player.lapTimes.reduce((a, b) => a + b, 0);
-        let bestLap = Math.min(...player.lapTimes);
+        // Use recorded finish time for accuracy
+        let totalTime = player.finishTime > 0 ? player.finishTime : raceTime;
+        let bestLap = player.lapTimes.length > 0 ? Math.min(...player.lapTimes) : 0;
 
         document.getElementById('finalTime').innerText = formatTime(totalTime);
         document.getElementById('bestLap').innerText = formatTime(bestLap);
@@ -807,13 +832,12 @@
         if (GAME_STATE === 'menu') return;
 
         const now = Date.now();
-        // const dt = (now - lastFrameTime) / 1000; // Delta time if needed for smoother physics independent of FPS
         lastFrameTime = now;
 
         update();
         draw();
 
-        if (GAME_STATE === 'racing' || GAME_STATE === 'finished') {
+        if (GAME_STATE === 'racing' || (GAME_STATE === 'finished' && !racers.every(r => r.finished))) {
             requestAnimationFrame(gameLoop);
         }
     }
@@ -827,11 +851,8 @@
         checkBoulderCollisions();
 
         // Update Camera to follow player smoothly
-        // Target camera position is centered on player
         let targetCamX = player.x - canvas.width / 2;
         let targetCamY = player.y - canvas.height / 2;
-
-        // Simple lerp for smooth camera
         camera.x += (targetCamX - camera.x) * 0.1;
         camera.y += (targetCamY - camera.y) * 0.1;
 
@@ -839,31 +860,38 @@
         if (GAME_STATE === 'racing') {
             raceTime = Date.now() - raceStartTime;
             document.getElementById('timer').innerText = formatTime(raceTime);
-            updateRacePosition();
         }
+        // Always update position for live ranking
+        updateRacePosition();
     }
 
     function updateRacePosition() {
-        // This function calculates each racer's position. It works by assigning a 'raceScore'.
-        // A higher score means a better position. The score is calculated as follows:
-        // 1. Lap number is the most important factor (multiplied by a large number).
-        // 2. The index of the next *original* waypoint is the second factor. We use the original
-        //    waypoints here as they provide stable, well-spaced checkpoints for progress.
-        // 3. The distance *to* the next waypoint is subtracted, so being closer gives a higher score.
-
+        // Calculate the race score for any racer who hasn't finished yet.
         racers.forEach(r => {
-            let distToNext = Math.sqrt(Math.pow(r.x - WAYPOINTS[r.nextWaypointIndex].x, 2) + Math.pow(r.y - WAYPOINTS[r.nextWaypointIndex].y, 2));
-
-            // This addresses an edge case: when a racer completes a lap, their next waypoint index
-            // resets to 0. To prevent their score from incorrectly dropping, we treat waypoint 0
-            // as having the highest index for scoring purposes.
-            let scoringWaypointIndex = r.nextWaypointIndex === 0 ? WAYPOINTS.length : r.nextWaypointIndex;
-
-            r.raceScore = (r.currentLap * 100000) + (scoringWaypointIndex * 1000) - distToNext;
+            if (!r.finished) {
+                let distToNext = Math.sqrt(Math.pow(r.x - WAYPOINTS[r.nextWaypointIndex].x, 2) + Math.pow(r.y - WAYPOINTS[r.nextWaypointIndex].y, 2));
+                let scoringWaypointIndex = r.nextWaypointIndex === 0 ? WAYPOINTS.length : r.nextWaypointIndex;
+                r.raceScore = (r.currentLap * 100000) + (scoringWaypointIndex * 1000) - distToNext;
+            }
         });
 
-        // Sort the racers array in place from highest score to lowest
-        racers.sort((a, b) => b.raceScore - a.raceScore);
+        // Sort racers based on a clear hierarchy:
+        // 1. Finished racers always rank higher than unfinished ones.
+        // 2. Finished racers are sorted by their finish time (lower is better).
+        // 3. Unfinished racers are sorted by their race score (higher is better).
+        racers.sort((a, b) => {
+            if (a.finished && !b.finished) return -1; // a is finished, b is not -> a comes first
+            if (!a.finished && b.finished) return 1;  // b is finished, a is not -> b comes first
+
+            if (a.finished && b.finished) {
+                // Both are finished, sort by finish time
+                return a.finishTime - b.finishTime;
+            } else {
+                // Neither is finished, sort by race score
+                return b.raceScore - a.raceScore;
+            }
+        });
+
         let playerPos = racers.indexOf(player) + 1;
 
         let suffix = 'th';
@@ -990,22 +1018,29 @@
     }
 
     function drawTrack() {
-        // 1. Draw Track Border (Sand/Shore)
-        ctx.lineJoin = 'round';
+        // To render a variable-width track, we draw it segment by segment,
+        // allowing the line width to change for each piece. This is simpler than
+        // calculating and drawing complex polygons for the river banks.
         ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(CURVED_WAYPOINTS[0].x, CURVED_WAYPOINTS[0].y);
-        for (let i = 1; i < CURVED_WAYPOINTS.length; i++) ctx.lineTo(CURVED_WAYPOINTS[i].x, CURVED_WAYPOINTS[i].y);
-        ctx.closePath();
-        ctx.lineWidth = TRACK_WIDTH + 20; // Slightly wider than water for shore
+
+        // 1. Draw Track Border (Sand/Shore)
+        // We draw the shore first as a thick line, then draw the water over it.
         ctx.strokeStyle = '#c2b280'; // Sand color
-        ctx.stroke();
+        for(let i = 0; i < CURVED_WAYPOINTS.length; i++) {
+            const p = CURVED_WAYPOINTS[i];
+            const p_next = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p_next.x, p_next.y);
+            ctx.lineWidth = p.width + 20; // Shore is slightly wider than the water
+            ctx.stroke();
+        }
 
         // Add some texture to the shore
         for(let i = 0; i < 200; i++) {
             const point = getPointAlongTrack(Math.random() * trackLength);
             const offsetAngle = point.angle + Math.PI / 2;
-            const offsetDist = TRACK_WIDTH/2 + 5 + Math.random() * 10;
+            const offsetDist = point.width / 2 + 5 + Math.random() * 10;
             const x = point.x + Math.cos(offsetAngle) * offsetDist * (Math.random() < 0.5 ? 1 : -1);
             const y = point.y + Math.sin(offsetAngle) * offsetDist * (Math.random() < 0.5 ? 1 : -1);
             ctx.fillStyle = `rgba(0,0,0,${0.05 + Math.random() * 0.05})`;
@@ -1014,43 +1049,44 @@
             ctx.fill();
         }
 
-
         // 2. Draw Water with layers for depth
         const waterColors = ['#005f9a', '#006aae', '#0077be'];
         for(let i = waterColors.length - 1; i >= 0; i--) {
-            ctx.beginPath();
-            ctx.moveTo(CURVED_WAYPOINTS[0].x, CURVED_WAYPOINTS[0].y);
-            for (let j = 1; j < CURVED_WAYPOINTS.length; j++) ctx.lineTo(CURVED_WAYPOINTS[j].x, CURVED_WAYPOINTS[j].y);
-            ctx.closePath();
-            ctx.lineWidth = TRACK_WIDTH - i * 20;
             ctx.strokeStyle = waterColors[i];
-            ctx.stroke();
+            for(let j = 0; j < CURVED_WAYPOINTS.length; j++) {
+                 const p = CURVED_WAYPOINTS[j];
+                 const p_next = CURVED_WAYPOINTS[(j + 1) % CURVED_WAYPOINTS.length];
+                 ctx.beginPath();
+                 ctx.moveTo(p.x, p.y);
+                 ctx.lineTo(p_next.x, p_next.y);
+                 // Each layer is narrower than the last, creating a depth effect
+                 const width = p.width - i * 20;
+                 ctx.lineWidth = width > 0 ? width : 0;
+                 ctx.stroke();
+            }
         }
-
-
-
-        // 3. Centerline removed as requested
     }
 
     function drawFinishLine() {
         ctx.save();
         ctx.translate(WAYPOINTS[0].x, WAYPOINTS[0].y);
         // Rotate to be perpendicular to track at start
-        // Approx angle between last and first waypoint
         let dx = WAYPOINTS[1].x - WAYPOINTS[WAYPOINTS.length-1].x;
         let dy = WAYPOINTS[1].y - WAYPOINTS[WAYPOINTS.length-1].y;
         let angle = Math.atan2(dy, dx);
         ctx.rotate(angle + Math.PI/2);
 
+        const finishLineWidth = WAYPOINTS[0].width;
+
         // Checkered pattern
         let rows = 4;
         let cols = 12;
-        let cellW = TRACK_WIDTH / cols;
+        let cellW = finishLineWidth / cols;
         let cellH = 10;
         for(let r=0; r<rows; r++) {
             for(let c=0; c<cols; c++) {
                 ctx.fillStyle = (r+c)%2 === 0 ? 'white' : 'black';
-                ctx.fillRect(-TRACK_WIDTH/2 + c*cellW, -cellH*rows/2 + r*cellH, cellW, cellH);
+                ctx.fillRect(-finishLineWidth/2 + c*cellW, -cellH*rows/2 + r*cellH, cellW, cellH);
             }
         }
         ctx.restore();
