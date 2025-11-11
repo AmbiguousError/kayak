@@ -460,63 +460,36 @@
             ctx.translate(this.x, this.y);
             ctx.rotate(this.angle);
 
-            // Canoe Body with gradient for depth
-            const gradient = ctx.createLinearGradient(-15, 0, 15, 0);
-            gradient.addColorStop(0, this.color);
-            gradient.addColorStop(0.5, tinycolor(this.color).darken(10).toString());
-            gradient.addColorStop(1, this.color);
-
-            ctx.fillStyle = gradient;
+            // Canoe Body
+            ctx.fillStyle = this.color;
             ctx.beginPath();
+            // Draw an elongated oval shape
             ctx.moveTo(15, 0);
             ctx.bezierCurveTo(15, 7, -15, 7, -15, 0);
             ctx.bezierCurveTo(-15, -7, 15, -7, 15, 0);
             ctx.fill();
 
-            // Wooden gunwales (rim of the canoe)
-            ctx.strokeStyle = '#8B4513'; // SaddleBrown
-            ctx.lineWidth = 1.5;
+            // Outline for visibility
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
             ctx.stroke();
 
-            // Rower with a simple body
+            // Rower (just a dot for head)
             ctx.fillStyle = '#f0d0b0'; // Skin tone
             ctx.beginPath();
-            ctx.arc(-2, 0, 4, 0, Math.PI * 2); // Head
+            ctx.arc(-2, 0, 4, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = this.color; // Shirt color matches canoe
-            ctx.fillRect(-6, -3, 8, 6); // Torso
 
-            // Paddle animation
-            const paddleCycle = Math.sin(Date.now() * 0.01 * this.speed); // Cycle based on speed
-            const paddleSide = paddleCycle > 0 ? 1 : -1;
-            const paddleAngle = paddleCycle * 0.5; // Angle of the paddle shaft
-
-            if (this.speed > 0.5) {
-                 ctx.strokeStyle = '#654321'; // Dark brown for paddle
-                 ctx.lineWidth = 1.5;
-                 ctx.save();
-                 ctx.translate(-2, 6 * paddleSide); // Position paddle near rower
-                 ctx.rotate(paddleAngle);
-                 // Shaft
+            // Paddle (visual only, animates when velocity is high)
+            if (this.speed > 1) {
+                 // Simple paddle flicker
+                 let paddleSide = Math.sin(Date.now() / 100) > 0 ? 1 : -1;
+                 ctx.strokeStyle = '#654321';
+                 ctx.lineWidth = 2;
                  ctx.beginPath();
-                 ctx.moveTo(0, 0);
-                 ctx.lineTo(0, 8);
+                 ctx.moveTo(0, 5 * paddleSide);
+                 ctx.lineTo(-5, 12 * paddleSide);
                  ctx.stroke();
-                 // Blade
-                 ctx.fillStyle = '#654321';
-                 ctx.fillRect(-1.5, 8, 3, 4);
-                 ctx.restore();
-            }
-
-            // Wake effect
-            if(this.speed > 3) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(-15, 3);
-                ctx.lineTo(-20 - this.speed, 0);
-                ctx.lineTo(-15, -3);
-                ctx.stroke();
             }
 
             ctx.restore();
@@ -566,12 +539,16 @@
             };
 
             // Pre-generate particles for animation
-            const PARTICLE_COUNT = 30;
+            const PARTICLE_COUNT = 25;
             for(let j=0; j<PARTICLE_COUNT; j++) {
+                const maxLife = 50 + Math.random() * 50;
                 rapid.particles.push({
                     x: (Math.random() - 0.5) * rapid.length,
                     y: (Math.random() - 0.5) * rapid.width,
-                    speed: 2 + Math.random() * 2
+                    life: Math.random() * maxLife,
+                    maxLife: maxLife,
+                    radius: Math.random() * 3 + 1,
+                    opacity: 0
                 });
             }
 
@@ -642,6 +619,7 @@
         }
 
         const SAFE_ZONE_RADIUS = 200;
+        const MIN_BOULDER_DISTANCE = 100;
         const startPoint = WAYPOINTS[0];
 
         while (boulders.length < BOULDER_COUNT) {
@@ -675,6 +653,19 @@
             if (Math.sqrt(dx_start*dx_start + dy_start*dy_start) < SAFE_ZONE_RADIUS) {
                 continue; // Too close to start, try again
             }
+
+            // Check if the boulder is too close to another boulder
+            let tooClose = false;
+            for (const other of boulders) {
+                const dx = finalX - other.x;
+                const dy = finalY - other.y;
+                if (Math.sqrt(dx*dx + dy*dy) < MIN_BOULDER_DISTANCE) {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (tooClose) continue;
+
 
             const radius = 15 + Math.random() * 10; // Boulders of varying sizes
 
@@ -964,22 +955,6 @@
         ctx.strokeStyle = '#0077be'; // Water color
         ctx.stroke();
 
-        // Water surface animation
-        ctx.save();
-        ctx.clip(); // Clip to the water path
-        const waveSpeed = 0.0005;
-        const waveHeight = 2;
-        const waveFreq = 0.1;
-        for (let i=0; i < 20; i++) {
-            const waveOffset = Math.sin(Date.now() * waveSpeed * (1 + i*0.1) + i*10) * waveHeight;
-            ctx.strokeStyle = `rgba(255,255,255,${0.05 + Math.random()*0.1})`;
-            ctx.lineWidth = 1 + Math.random();
-            ctx.beginPath();
-            ctx.moveTo(-1000 + waveOffset, i * 100);
-            ctx.lineTo(3000 + waveOffset, i * 100);
-            ctx.stroke();
-        }
-        ctx.restore();
 
 
         // 3. Draw Centerline (faint)
@@ -1021,27 +996,28 @@
             ctx.rotate(rapid.angle);
 
             // Draw the semi-transparent base of the rapids
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
             ctx.fillRect(-rapid.length / 2, -rapid.width / 2, rapid.length, rapid.width);
 
-            // Draw and update animated particles (streaks)
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
+            // Draw and update animated ripple particles
             rapid.particles.forEach(p => {
-                // Move particle
-                p.x += p.speed;
-                // Wrap particle around if it goes off the edge
-                if (p.x > rapid.length / 2) {
-                    p.x = -rapid.length / 2;
-                    p.y = (Math.random() - 0.5) * rapid.width; // Respawn at a new vertical pos
+                p.life++;
+                if (p.life > p.maxLife) {
+                    p.x = (Math.random() - 0.5) * rapid.length;
+                    p.y = (Math.random() - 0.5) * rapid.width;
+                    p.life = 0;
+                    p.radius = Math.random() * 3 + 1;
                 }
 
-                // Draw streak
-                ctx.moveTo(p.x - 10, p.y);
-                ctx.lineTo(p.x, p.y);
+                // Fade in and out
+                const life_percent = p.life / p.maxLife;
+                p.opacity = Math.sin(life_percent * Math.PI) * 0.5;
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * life_percent, 0, Math.PI * 2);
+                ctx.fill();
             });
-            ctx.stroke();
 
             ctx.restore();
         });
