@@ -272,7 +272,7 @@
             if (isAi) {
                 // Give AI slightly different stats so they don't stack perfectly
                 // Skill reverted to target laps around 25s+ for better balance
-                this.aiSkill = 0.68 + Math.random() * 0.05; // 0.68 to 0.73
+                this.aiSkill = (0.68 + Math.random() * 0.05) * 0.8; // Reduced by 20%
                 // Have the AI target a point within the track, not just the center line
                 // Use the starting line width as a basis for their random offset
                 const startWidth = WAYPOINTS[0].width;
@@ -725,7 +725,7 @@
         ];
 
         racers = [];
-        const totalRacers = 10;
+        const totalRacers = 20;
         const boatsPerRow = 5;
         const startOffset = -40; // Base offset to put the first row behind the line
         const rowSpacing = -60;  // Space between rows
