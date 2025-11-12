@@ -266,6 +266,7 @@
             // Paddle cooldowns to prevent just holding the button for max speed
             this.paddleCooldownLeft = 0;
             this.paddleCooldownRight = 0;
+            this.wakeParticles = []; // For the visual wake effect
 
             // AI specific
             if (isAi) {
@@ -321,6 +322,37 @@
             this.checkTrackLimits();
             this.checkWaypoints();
             this.checkRapids();
+            this.updateWake();
+        }
+
+        updateWake() {
+            // Add new wake particles if the canoe is moving
+            if (this.speed > 2) {
+                const WAKE_OFFSET = -15; // Position wake behind the canoe
+                const wakeX = this.x + Math.cos(this.angle) * WAKE_OFFSET;
+                const wakeY = this.y + Math.sin(this.angle) * WAKE_OFFSET;
+
+                this.wakeParticles.push({
+                    x: wakeX,
+                    y: wakeY,
+                    size: 4 + Math.random() * 4,
+                    life: 60, // Lifespan in frames
+                    maxLife: 60,
+                    opacity: 0.5,
+                });
+            }
+
+            // Update and fade existing particles
+            for (let i = this.wakeParticles.length - 1; i >= 0; i--) {
+                const p = this.wakeParticles[i];
+                p.life--;
+                p.size *= 0.98; // Shrink over time
+                p.opacity = 0.5 * (p.life / p.maxLife);
+
+                if (p.life <= 0) {
+                    this.wakeParticles.splice(i, 1);
+                }
+            }
         }
 
         paddle(side) {
@@ -674,16 +706,47 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
 
-        // Determine start positions (grid near waypoint 0)
-        const startX = WAYPOINTS[0].x;
-        const startY = WAYPOINTS[0].y;
+        const startPoint = WAYPOINTS[0];
+        // Determine the track's direction at the start line to align the grid
+        const startAngle = Math.atan2(WAYPOINTS[1].y - WAYPOINTS[WAYPOINTS.length-1].y, WAYPOINTS[1].x - WAYPOINTS[WAYPOINTS.length-1].x);
 
-        racers = [
-            new Canoe(startX, startY - 20, '#ffdd00'), // Player (Yellow)
-            new Canoe(startX - 40, startY + 20, '#ff3333', true), // AI Red
-            new Canoe(startX - 80, startY - 20, '#33ff33', true), // AI Green
-            new Canoe(startX - 120, startY + 20, '#3333ff', true)  // AI Blue
+        const forwardVec = { x: Math.cos(startAngle), y: Math.sin(startAngle) };
+        const rightVec = { x: Math.cos(startAngle + Math.PI / 2), y: Math.sin(startAngle + Math.PI / 2) };
+
+        const RACER_COLORS = [
+            '#ffdd00', // Player (Yellow)
+            '#ff3333', '#33ff33', '#3333ff', // Original AI (Red, Green, Blue)
+            '#ff9900', // Orange
+            '#ff00ff', // Magenta
+            '#00ffff', // Cyan
+            '#9900ff', // Purple
+            '#cccccc', // Silver
+            '#ffffff'  // White
         ];
+
+        racers = [];
+        const totalRacers = 10;
+        const boatsPerRow = 5;
+        const startOffset = -40; // Base offset to put the first row behind the line
+        const rowSpacing = -60;  // Space between rows
+        const colSpacing = 40;   // Space between boats in a row
+
+        for (let i = 0; i < totalRacers; i++) {
+            const row = Math.floor(i / boatsPerRow);
+            const col = i % boatsPerRow;
+
+            // Center the grid on the start line
+            const colOffset = (col - (boatsPerRow - 1) / 2) * colSpacing;
+
+            // Calculate position relative to start point and track angle
+            const totalRowOffset = startOffset + (row * rowSpacing);
+            const startX = startPoint.x + (totalRowOffset * forwardVec.x) + (colOffset * rightVec.x);
+            const startY = startPoint.y + (totalRowOffset * forwardVec.y) + (colOffset * rightVec.y);
+
+            const isAi = i > 0; // The first boat (i=0) is the player
+            racers.push(new Canoe(startX, startY, RACER_COLORS[i % RACER_COLORS.length], isAi));
+        }
+
         player = racers[0];
 
         // Setup Camera initial position
@@ -1012,6 +1075,9 @@
         // Draw Boulders
         drawBoulders();
 
+        // Draw Wakes before racers so they appear underneath
+        drawWakes();
+
         // Draw Racers
         racers.forEach(racer => racer.draw());
 
@@ -1091,6 +1157,17 @@
             }
         }
         ctx.restore();
+    }
+
+    function drawWakes() {
+        racers.forEach(racer => {
+            racer.wakeParticles.forEach(p => {
+                ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        });
     }
 
     function drawRapids() {
