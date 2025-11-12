@@ -152,66 +152,26 @@
     let raceTime = 0;
     let lastFrameTime = 0;
 
-    // --- Track Data ---
-    // A collection of different course layouts. Each race will randomly select one.
-    const COURSE_LAYOUTS = [
-        {
-            name: "Original River",
-            specialFeature: null, // No special feature for the original
-            waypoints: [
-                {x: 200, y: 200, width: 200},
-                {x: 600, y: 100, width: 150},
-                {x: 1000, y: 150, width: 150},
-                {x: 1300, y: 300, width: 200},
-                {x: 1400, y: 600, width: 250},
-                {x: 1200, y: 900, width: 180},
-                {x: 800, y: 1000, width: 150},
-                {x: 600, y: 850, width: 150},
-                {x: 300, y: 900, width: 200},
-                {x: 100, y: 600, width: 220}
-            ]
-        },
-        {
-            name: "Canyon Tunnel",
-            specialFeature: 'tunnel',
-            waypoints: [
-                {x: 200, y: 150, width: 200},
-                {x: 600, y: 100, width: 250},
-                {x: 1000, y: 150, width: 200},
-                {x: 1200, y: 300, width: 150, feature: 'tunnel'}, // Start of tunnel
-                {x: 1200, y: 800, width: 100, feature: 'tunnel'}, // End of tunnel
-                {x: 1000, y: 950, width: 150},
-                {x: 600, y: 1000, width: 200},
-                {x: 200, y: 850, width: 250},
-                {x: 200, y: 400, width: 200}
-            ]
-        },
-        {
-            name: "Highland Aqueduct",
-            specialFeature: 'aqueduct',
-            waypoints: [
-                {x: 200, y: 200, width: 200},
-                {x: 500, y: 100, width: 150},
-                {x: 1200, y: 100, width: 120, feature: 'aqueduct'}, // Start of aqueduct
-                {x: 1500, y: 200, width: 200},
-                {x: 1600, y: 500, width: 250},
-                {x: 1500, y: 800, width: 200},
-                {x: 1200, y: 900, width: 150, feature: 'aqueduct'}, // End of aqueduct
-                {x: 500, y: 900, width: 120},
-                {x: 200, y: 800, width: 200},
-                {x: 100, y: 500, width: 250}
-            ]
-        }
+    // The Track - Defined by a series of center points, each with a specific width.
+    // This creates a more dynamic river with varying widths and more complex bends.
+    const WAYPOINTS = [
+        {x: 200, y: 200, width: 200},
+        {x: 600, y: 100, width: 150},
+        {x: 1000, y: 150, width: 150},
+        {x: 1300, y: 300, width: 200},
+        {x: 1400, y: 600, width: 250}, // A wider section
+        {x: 1200, y: 900, width: 180},
+        {x: 800, y: 1000, width: 150}, // A narrow chicane
+        {x: 600, y: 850, width: 150},
+        {x: 300, y: 900, width: 200},
+        {x: 100, y: 600, width: 220}
     ];
 
-    let currentCourse; // This will hold the selected course for the race
-    let WAYPOINTS = []; // Will be populated by the selected course's waypoints
     let trackLength = 0;
-    let trackSegments = []; // Note: Mutated by loadCourse
-    let CURVED_WAYPOINTS = []; // Note: Mutated by loadCourse
-    const CURVE_RESOLUTION = 15;
+    const trackSegments = [];
 
-    // --- Track Generation ---
+    let CURVED_WAYPOINTS = []; // This will hold the high-resolution track points
+    const CURVE_RESOLUTION = 15; // Number of points per waypoint segment
 
     // Function to implement Catmull-Rom spline interpolation for a point
     function catmullRomPoint(p0, p1, p2, p3, t) {
@@ -220,8 +180,7 @@
         const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
         const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
         const width = 0.5 * ((2 * p1.width) + (-p0.width + p2.width) * t + (2 * p0.width - 5 * p1.width + 4 * p2.width - p3.width) * t2 + (-p0.width + 3 * p1.width - 3 * p2.width + p3.width) * t3);
-        // We can't interpolate a string, so we'll just carry over the feature tag from the start of the segment
-        return {x, y, width, feature: p1.feature};
+        return {x, y, width};
     }
 
     // Generates a high-resolution curved path from the base waypoints
@@ -243,28 +202,15 @@
         return curvedPoints;
     }
 
-    // New function to load a specific course and generate its geometry
-    function loadCourse(course) {
-        currentCourse = course;
-        WAYPOINTS = course.waypoints;
+    CURVED_WAYPOINTS = generateCurvedTrack(WAYPOINTS, CURVE_RESOLUTION);
 
-        // Reset track geometry arrays
-        trackSegments.length = 0;
-        CURVED_WAYPOINTS.length = 0;
-        trackLength = 0;
-
-        // Generate the high-resolution curved track
-        const generatedCurve = generateCurvedTrack(WAYPOINTS, CURVE_RESOLUTION);
-        CURVED_WAYPOINTS.push(...generatedCurve);
-
-        // Calculate the track segments and total length from the new curved path
-        for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
-            const p1 = CURVED_WAYPOINTS[i];
-            const p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
-            const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
-            trackSegments.push({ p1, p2, length });
-            trackLength += length;
-        }
+    // Now that CURVED_WAYPOINTS is populated, calculate the track segments and total length
+    for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
+        const p1 = CURVED_WAYPOINTS[i];
+        const p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
+        const length = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        trackSegments.push({ p1, p2, length });
+        trackLength += length;
     }
 
     function getPointAlongTrack(distance) {
@@ -760,10 +706,6 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
 
-        // *** New: Randomly select and load a course layout for the race.
-        const courseIndex = Math.floor(Math.random() * COURSE_LAYOUTS.length);
-        loadCourse(COURSE_LAYOUTS[courseIndex]);
-
         const startPoint = WAYPOINTS[0];
         // Determine the track's direction at the start line to align the grid
         const startAngle = Math.atan2(WAYPOINTS[1].y - WAYPOINTS[WAYPOINTS.length-1].y, WAYPOINTS[1].x - WAYPOINTS[WAYPOINTS.length-1].x);
@@ -1125,9 +1067,6 @@
         // Draw Finish Line (At Waypoint 0)
         drawFinishLine();
 
-        // Draw Track Features (Tunnels, Aqueducts)
-        drawTrackFeatures();
-
         // Draw Rapids
         drawRapids();
 
@@ -1139,10 +1078,6 @@
 
         // Draw Racers
         racers.forEach(racer => racer.draw());
-
-        // --- Overlays (drawn after everything else within the camera transform) ---
-        drawTunnelOverlay();
-
 
         ctx.restore();
     }
@@ -1197,87 +1132,6 @@
         }
     }
 
-    function drawTrackFeatures() {
-        if (!currentCourse || !currentCourse.specialFeature) {
-            return; // No features to draw for this course
-        }
-
-        // --- Aqueduct Drawing ---
-        if (currentCourse.specialFeature === 'aqueduct') {
-            for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
-                const p = CURVED_WAYPOINTS[i];
-                if (p.feature === 'aqueduct') {
-                    // Draw a pillar every N points for spacing
-                    if (i % 15 === 0) {
-                        const pillarWidth = 40;
-                        const pillarHeight = 150; // How "high" the aqueduct is
-                        ctx.fillStyle = '#8a8a8a'; // Stone grey
-                        ctx.strokeStyle = '#5a5a5a';
-                        ctx.lineWidth = 3;
-
-                        // Left side pillar
-                        const leftAngle = Math.atan2(p.y - p.x, p.x + p.y) + Math.PI / 2;
-                        const leftPillarX = p.x - Math.cos(leftAngle) * (p.width / 2 + pillarWidth / 2);
-                        const leftPillarY = p.y - Math.sin(leftAngle) * (p.width / 2 + pillarWidth / 2);
-                        ctx.fillRect(leftPillarX - pillarWidth / 2, leftPillarY, pillarWidth, pillarHeight);
-                        ctx.strokeRect(leftPillarX - pillarWidth / 2, leftPillarY, pillarWidth, pillarHeight);
-
-                        // Right side pillar
-                        const rightPillarX = p.x + Math.cos(leftAngle) * (p.width / 2 + pillarWidth / 2);
-                        const rightPillarY = p.y + Math.sin(leftAngle) * (p.width / 2 + pillarWidth / 2);
-                        ctx.fillRect(rightPillarX - pillarWidth / 2, rightPillarY, pillarWidth, pillarHeight);
-                        ctx.strokeRect(rightPillarX - pillarWidth / 2, rightPillarY, pillarWidth, pillarHeight);
-                    }
-                }
-            }
-        }
-
-        // --- Tunnel Drawing (drawn after racers, so handled in main draw loop) ---
-        // We just draw the entrance/exit arches here for now
-        if (currentCourse.specialFeature === 'tunnel') {
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.strokeStyle = '#3b2a1a';
-            ctx.lineWidth = 15;
-            for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
-                const p1 = CURVED_WAYPOINTS[i];
-                const p_prev = CURVED_WAYPOINTS[(i - 1 + CURVED_WAYPOINTS.length) % CURVED_WAYPOINTS.length];
-
-                // Detect start of a tunnel section
-                if (p1.feature === 'tunnel' && p_prev.feature !== 'tunnel') {
-                    drawTunnelArch(p1, p_prev);
-                }
-                 // Detect end of a tunnel section
-                if (p1.feature !== 'tunnel' && p_prev.feature === 'tunnel') {
-                    drawTunnelArch(p_prev, p1); // Draw arch at the exit
-                }
-            }
-        }
-    }
-
-    function drawTunnelArch(p_inside, p_outside) {
-        const angle = Math.atan2(p_inside.y - p_outside.y, p_inside.x - p_outside.x) + Math.PI / 2;
-        const width = p_inside.width * 1.5;
-        const height = p_inside.width * 1.2;
-
-        ctx.save();
-        ctx.translate(p_inside.x, p_inside.y);
-        ctx.rotate(angle);
-
-        // Main arch shape
-        ctx.beginPath();
-        ctx.moveTo(-width / 2, 0);
-        ctx.quadraticCurveTo(0, -height, width / 2, 0);
-        ctx.lineTo(width/2, height);
-        ctx.lineTo(-width/2, height);
-        ctx.closePath();
-
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.restore();
-    }
-
-
     function drawFinishLine() {
         ctx.save();
         ctx.translate(WAYPOINTS[0].x, WAYPOINTS[0].y);
@@ -1312,36 +1166,6 @@
                 ctx.fill();
             });
         });
-    }
-
-    function drawTunnelOverlay() {
-        if (currentCourse && currentCourse.specialFeature === 'tunnel') {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            ctx.strokeStyle = '#2a1a0a';
-            ctx.lineWidth = 10;
-
-            for (let i = 0; i < CURVED_WAYPOINTS.length; i++) {
-                const p1 = CURVED_WAYPOINTS[i];
-                if (p1.feature === 'tunnel') {
-                    const p2 = CURVED_WAYPOINTS[(i + 1) % CURVED_WAYPOINTS.length];
-                    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                    const perpAngle = angle + Math.PI / 2;
-
-                    const p1_left = { x: p1.x - Math.cos(perpAngle) * p1.width, y: p1.y - Math.sin(perpAngle) * p1.width };
-                    const p1_right = { x: p1.x + Math.cos(perpAngle) * p1.width, y: p1.y + Math.sin(perpAngle) * p1.width };
-                    const p2_left = { x: p2.x - Math.cos(perpAngle) * p2.width, y: p2.y - Math.sin(perpAngle) * p2.width };
-                    const p2_right = { x: p2.x + Math.cos(perpAngle) * p2.width, y: p2.y + Math.sin(perpAngle) * p2.width };
-
-                    ctx.beginPath();
-                    ctx.moveTo(p1_left.x, p1_left.y);
-                    ctx.lineTo(p1_right.x, p1_right.y);
-                    ctx.lineTo(p2_right.x, p2_right.y);
-                    ctx.lineTo(p2_left.x, p2_left.y);
-                    ctx.closePath();
-                    ctx.fill();
-                }
-            }
-        }
     }
 
     function drawRapids() {
